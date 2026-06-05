@@ -14,6 +14,7 @@ Quantitative factor detection pipeline: calculate → IC/IR analyze → layered 
 - **Layered Backtest** - Quantile-based portfolio analysis
 - **HTML Reports** - Interactive analysis reports with charts
 - **Multiple Data Sources** - DuckDB, Parquet, CSV support
+- **Unified CLI** - Full command-line interface (`fp` command)
 
 ## Installation
 
@@ -37,47 +38,78 @@ pip install -e ".[dev]"
 
 ## Quick Start
 
-### CLI Usage
+### CLI Usage (`fp` command)
+
+After installation, use the `fp` command:
 
 ```bash
-# List all available factors
-python run.py factors
+# Data management
+fp data init --db data/ohlcv.duckdb
+fp data import data.csv --table daily_ohlcv
+fp data info
+fp data query "SELECT * FROM daily_ohlcv LIMIT 10"
+fp data stats --table daily_ohlcv
+fp data instruments --market SSE
+fp data export "SELECT * FROM daily_ohlcv" --output data.csv
 
-# View factor documentation
-python run.py doc alpha001
+# Factor analysis
+fp factor list
+fp factor doc alpha001
+fp factor run "Mean($close, 20)" --start 2020-01-01 --end 2024-12-31
+fp factor batch factors.txt --output results/
 
-# Run factor analysis
-python run.py run \
-  --factors alpha001 alpha006 alpha014 \
-  --data data/ohlcv.duckdb \
-  --start 2020-01-01 \
-  --end 2025-12-31
+# Backtesting
+fp backtest run --factors alpha001,alpha014 --start 2020-01-01
+fp backtest ic --factor alpha001
+fp backtest layered --factor alpha001
+
+# Reports
+fp report generate --factors alpha001,alpha014 --output report.html
+
+# Interactive shell
+fp shell
+```
+
+### Alternative CLI Usage
+
+Without installation, use Python module syntax:
+
+```bash
+# Data management
+python -m data.cli import-csv data.csv --table daily_ohlcv
+python -m data.cli info
+
+# Standalone scripts
+python scripts/csv2duckdb.py data.csv --table daily_ohlcv
 ```
 
 ### Python API
 
 ```python
+from data.storage import DuckDBStorage
 from data.loader import DataLoader
-from data.preprocessor import DataPreprocessor
 from factors.registry import FactorRegistry
 from analysis.ic import ICAnalysis
 from analysis.layered import LayeredBacktest
-from analysis.report import FactorReport
 import importlib
 
-# 1. Load data
+# 1. Initialize DuckDB and import data
+db = DuckDBStorage("data/ohlcv.duckdb")
+db.import_csv("daily.csv", table="daily_ohlcv")
+
+# 2. Load data via DataLoader
 loader = DataLoader("duckdb", "data/ohlcv.duckdb")
 data = loader.load(start="2020-01-01", end="2025-12-31")
 
-# 2. Register factor modules
+# 3. Register factor modules
 importlib.import_module("factors.gtja191")
 importlib.import_module("factors.technical")
 
-# 3. Compute factor
+# 4. Compute factor
 alpha_fn = FactorRegistry.get("alpha001")
 factor_values = alpha_fn(data)
 
-# 4. IC Analysis
+# 5. IC Analysis
 close = data["close"]
 fwd_ret = close.groupby(level=1).shift(-5) / close - 1
 common = factor_values.dropna().index.intersection(fwd_ret.dropna().index)
@@ -85,14 +117,53 @@ ic = ICAnalysis(factor_values.loc[common], fwd_ret.loc[common])
 result = ic.run("spearman")
 print(f"IC Mean: {result.ic_mean:.4f}, IR: {result.ir:.3f}")
 
-# 5. Layered Backtest
+# 6. Layered Backtest
 lb = LayeredBacktest(factor_values.loc[common], fwd_ret.loc[common], n_quantiles=5)
 lb_result = lb.run()
 
-# 6. Generate HTML Report
+# 7. Generate HTML Report
+from analysis.report import FactorReport
 report = FactorReport(factor_values, close)
 report.to_html("reports/alpha001_report.html")
 ```
+
+## CLI Command Reference
+
+### Data Commands
+
+| Command | Description |
+|---------|-------------|
+| `fp data init` | Initialize database schema |
+| `fp data import <csv>` | Import CSV file |
+| `fp data info` | Show database information |
+| `fp data query <sql>` | Execute SQL query |
+| `fp data stats` | Show table statistics |
+| `fp data tables` | List all tables |
+| `fp data instruments` | List instruments |
+| `fp data export` | Export query results |
+
+### Factor Commands
+
+| Command | Description |
+|---------|-------------|
+| `fp factor list` | List all available factors |
+| `fp factor doc <name>` | Show factor documentation |
+| `fp factor run <expr>` | Run factor expression |
+| `fp factor batch <file>` | Run batch factors from file |
+
+### Backtest Commands
+
+| Command | Description |
+|---------|-------------|
+| `fp backtest run` | Run backtest for factors |
+| `fp backtest ic` | Run IC analysis |
+| `fp backtest layered` | Run layered backtest |
+
+### Report Commands
+
+| Command | Description |
+|---------|-------------|
+| `fp report generate` | Generate HTML report |
 
 ## Core Metrics
 
@@ -110,17 +181,19 @@ factor-pipeline/
 ├── factors/              # Factor implementations
 │   ├── base.py          # FactorABC base class + time-series operators
 │   ├── registry.py      # FactorRegistry (@register_factor)
+│   ├── ops.py           # Expression operators (80+)
 │   ├── gtja191.py       # 191 GTJA alpha factors
 │   └── technical.py     # Technical indicators
 ├── data/                # Data loading & preprocessing
+│   ├── storage.py       # DuckDB storage layer
 │   ├── loader.py        # DataLoader (DuckDB/Parquet/CSV)
 │   └── preprocessor.py  # DataPreprocessor
 ├── analysis/            # Analysis modules
 │   ├── ic.py           # ICAnalysis
 │   ├── layered.py      # LayeredBacktest
 │   └── report.py       # FactorReport
+├── cli/                 # CLI interface (fp command)
 ├── config/             # Configuration
-├── cli/                # CLI interface
 └── .github/workflows/   # CI/CD workflows
 ```
 
@@ -140,15 +213,54 @@ factor-pipeline/
 | `atr14` | 14-day Average True Range |
 | `obv` | On-Balance Volume |
 
+### Expression Operators (80+)
+
+| Category | Operators |
+|----------|-----------|
+| Time Series | `Ref`, `Delta`, `Sum`, `Mean`, `Std`, `Max`, `Min`, `Median`, `Corr`, `Cov` |
+| Cross-sectional | `Rank`, `Quantile`, `Decile` |
+| Decay | `DecayLinear`, `DecayExp`, `WMA`, `EMA`, `SMA` |
+| Math | `Log`, `Abs`, `Sign`, `Sqrt`, `Power`, `Exp`, `Tanh` |
+| Conditional | `Iif`, `Where`, `FillNa`, `IsNa` |
+
 ## Data Format
 
-Expected input data (MultiIndex DataFrame):
+### DuckDB Schema
 
+```sql
+-- OHLCV data
+CREATE TABLE daily_ohlcv (
+    date DATE,
+    symbol VARCHAR,
+    open DOUBLE,
+    high DOUBLE,
+    low DOUBLE,
+    close DOUBLE,
+    volume DOUBLE,
+    amount DOUBLE,
+    factor DOUBLE DEFAULT 1.0,
+    PRIMARY KEY (date, symbol)
+);
+
+-- Instruments
+CREATE TABLE instruments (
+    symbol VARCHAR PRIMARY KEY,
+    name VARCHAR,
+    list_date DATE,
+    delist_date DATE,
+    market VARCHAR,
+    industry VARCHAR
+);
 ```
-                 close    volume
-date       stock
-2020-01-02 600000.SH  10.5     1000000
-           000001.SZ   15.2      800000
+
+### CSV Import
+
+```bash
+# Auto-detect columns
+fp data import data.csv --table daily_ohlcv
+
+# Manual column mapping
+fp data import data.csv --table daily_ohlcv --date-col trade_date --symbol-col ts_code
 ```
 
 ## CI/CD

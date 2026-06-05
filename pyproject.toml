@@ -52,6 +52,9 @@ test = [
     "pytest>=7.4",
 ]
 
+[project.scripts]
+fp = "cli:main"
+
 [project.urls]
 Homepage = "https://github.com/openbot-coder/factor-pipeline"
 Documentation = "https://github.com/openbot-coder/factor-pipeline#readme"
