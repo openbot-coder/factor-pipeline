@@ -1,6 +1,12 @@
-"""data/ — data loading, alignment, and pre-processing."""
+"""Data module for factor-pipeline.
 
-from data.loader import DataLoader
-from data.preprocessor import DataPreprocessor
+This module provides:
+- DuckDB storage management
+- Data loading and querying
+- CSV/Parquet import tools
+- Expression evaluation
+"""
 
-__all__ = ["DataLoader", "DataPreprocessor"]
+from data.storage import DuckDBStorage
+
+__all__ = ["DuckDBStorage"]

@@ -34,6 +34,8 @@ dependencies = [
     "ta>=0.10",
     "jinja2>=3.1",
     "duckdb>=1.0",
+    "click>=8.0",
+    "pyarrow>=14.0",
 ]
 
 [project.optional-dependencies]
