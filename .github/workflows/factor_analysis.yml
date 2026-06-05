@@ -1,0 +1,84 @@
+name: Factor Analysis
+
+on:
+  schedule:
+    # Run at 6 AM and 6 PM daily (market open/close times)
+    - cron: '0 6,18 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      factors:
+        description: 'Factors to analyze (space separated)'
+        required: false
+        default: 'alpha001 alpha002 alpha003'
+      start_date:
+        description: 'Start date (YYYY-MM-DD)'
+        required: false
+        default: '2023-01-01'
+      end_date:
+        description: 'End date (YYYY-MM-DD)'
+        required: false
+        default: '2024-12-31'
+
+jobs:
+  analyze:
+    name: Run Factor Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -e .
+
+      - name: Check data availability
+        run: |
+          python -c "
+          from data.loader import DataLoader
+          loader = DataLoader('duckdb', 'data/ohlcv.duckdb')
+          print('Data source available')
+          " || echo "Note: No local data, will use demo data"
+
+      - name: Get input parameters
+        id: params
+        run: |
+          FACTORS="${{ github.event.inputs.factors || 'alpha001 alpha002 alpha003 alpha006 alpha012' }}"
+          START="${{ github.event.inputs.start_date || '2023-01-01' }}"
+          END="${{ github.event.inputs.end_date || '2024-12-31' }}"
+          echo "factors=$FACTORS" >> $GITHUB_OUTPUT
+          echo "start=$START" >> $GITHUB_OUTPUT
+          echo "end=$END" >> $GITHUB_OUTPUT
+
+      - name: Run factor analysis
+        env:
+          FACTORS: ${{ steps.params.outputs.factors }}
+          START: ${{ steps.params.outputs.start }}
+          END: ${{ steps.params.outputs.end }}
+        run: |
+          mkdir -p reports/scheduled
+          python run.py run \
+            --factors $FACTORS \
+            --start $START \
+            --end $END \
+            --out reports/scheduled
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: factor-reports-${{ github.run_number }}
+          path: reports/
+          retention-days: 30
+
+      - name: Create Summary Comment
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "## Factor Analysis Results" >> $GITHUB_STEP_SUMMARY
+          echo "Analyzed factors: $FACTORS" >> $GITHUB_STEP_SUMMARY
+          echo "Period: $START to $END" >> $GITHUB_STEP_SUMMARY
+          ls -la reports/scheduled/ 2>/dev/null | head -10 >> $GITHUB_STEP_SUMMARY || echo "No reports generated"

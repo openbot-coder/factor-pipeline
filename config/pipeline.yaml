@@ -1,0 +1,33 @@
+# Factor pipeline configuration
+
+data:
+  source: duckdb
+  path: data/ohlcv.duckdb
+  symbols: []           # empty = load all
+  start_date: "2020-01-01"
+  end_date: "2025-12-31"
+
+factor:
+  names:
+    - alpha001
+    - alpha006
+    - alpha012
+    - alpha014
+    - alpha018
+    - macd_diff
+    - rsi14
+    - bb_pct
+  max_window: 250
+  winsorize_pct: 0.01
+  neutralize: true
+
+backtest:
+  n_quantiles: 5
+  periods: [1, 5, 10]
+  long_short: true
+
+output:
+  report_dir: reports
+  report_format: html
+  save_csv: true
+  log_level: INFO

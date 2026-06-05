@@ -1,0 +1,67 @@
+name: Dependency Updates
+
+on:
+  schedule:
+    # Check for updates weekly on Sunday at 3 AM
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+
+jobs:
+  update-deps:
+    name: Check & Update Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install pip-tools
+        run: |
+          pip install pip-tools pipreview
+
+      - name: Check for outdated packages
+        id: check
+        run: |
+          echo "Checking for outdated packages..."
+          pipreview --local --async 2>&1 | tee outdated.txt || true
+          
+          # Count outdated packages
+          COUNT=$(grep -c "^" outdated.txt 2>/dev/null || echo "0")
+          echo "outdated_count=$COUNT" >> $GITHUB_OUTPUT
+          
+          if [ -s outdated.txt ]; then
+            echo "outdated=true" >> $GITHUB_OUTPUT
+          else
+            echo "outdated=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update pyproject.toml dependencies
+        if: steps.check.outputs.outdated == 'true'
+        run: |
+          echo "Updating dependencies..."
+          # Update specific critical packages
+          pip install --upgrade pandas numpy scipy scikit-learn
+          pip freeze > requirements.txt
+          
+          # Check if requirements.txt changed
+          if git diff --stat requirements.txt | grep -q .; then
+            echo "Requirements updated"
+            git config user.name "GitHub Actions"
+            git config user.email "actions@github.com"
+            git add requirements.txt
+            git commit -m "chore(deps): update pinned requirements"
+            git push || echo "Could not push updates"
+          fi
+
+      - name: Summary
+        run: |
+          echo "## Dependency Update Check" >> $GITHUB_STEP_SUMMARY
+          echo "Outdated packages: ${{ steps.check.outputs.outdated_count }}" >> $GITHUB_STEP_SUMMARY
+          if [ -f outdated.txt ]; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            head -20 outdated.txt >> $GITHUB_STEP_SUMMARY || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi

@@ -1,0 +1,29 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
+*.log
+reports/
+data/*.duckdb
+!data/*.duckdb.sample
+.env
+.idea/
+.vscode/
+*.swp
+*.swo
+
+
+# Large data directories
+qlib_demo/
+reports_csi500/
+reports/
+*.duckdb
+
+# OS files
+.DS_Store
+Thumbs.db
