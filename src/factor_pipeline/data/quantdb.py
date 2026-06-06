@@ -36,10 +36,10 @@ class IndexCode(Enum):
     CSI500 = ("000905", "SH", "中证500")
     CSI1000 = ("000852", "SH", "中证1000")
     
-    def __init__(self, code: str, exchange: str, name: str):
+    def __init__(self, code: str, exchange: str, name_zh: str):
         self.code = code
         self.exchange = exchange
-        self.name = name
+        self.name_zh = name_zh
     
     @property
     def full_code(self) -> str:
@@ -372,13 +372,15 @@ CREATE TABLE IF NOT EXISTS meta_validation_log (
 );
 -- 数据源配置
 CREATE TABLE IF NOT EXISTS meta_data_sources (
-    id INTEGER PRIMARY KEY, source_name VARCHAR UNIQUE, source_type VARCHAR, enabled BOOLEAN DEFAULT TRUE,
+    id INTEGER PRIMARY KEY,
+    source_name VARCHAR UNIQUE, source_type VARCHAR, enabled BOOLEAN DEFAULT TRUE,
     priority INTEGER DEFAULT 1, config JSON, last_fetch_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 -- ODS表注册
 CREATE TABLE IF NOT EXISTS meta_ods_tables (
-    id INTEGER PRIMARY KEY, source VARCHAR, table_type VARCHAR, table_name VARCHAR UNIQUE,
+    id INTEGER PRIMARY KEY,
+    source VARCHAR, table_type VARCHAR, table_name VARCHAR UNIQUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -423,6 +425,29 @@ class ValidationResult:
     details: Optional[dict] = None
 
 
+@dataclass
+class UpdateResult:
+    """更新结果"""
+    layer: str
+    table: str
+    source: str
+    records: int
+    status: str
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    error: Optional[str] = None
+    
+    @property
+    def duration_seconds(self) -> float:
+        if self.end_time:
+            return (self.end_time - self.start_time).total_seconds()
+        return 0.0
+    
+    @property
+    def is_success(self) -> bool:
+        return self.status == "SUCCESS"
+
+
 # =============================================================================
 # QuantDB Class
 # =============================================================================
@@ -436,10 +461,10 @@ class QuantDB:
         self.config = config or {}
         self._conn: Optional[duckdb.DuckDBPyConnection] = None
         
-        if db_path != ":memory:" and not os.path.exists(db_path):
+        # 连接并初始化 (包括 :memory: 数据库)
+        self.connect()
+        if not read_only:
             self.init_schema()
-        elif db_path != ":memory:":
-            self.connect()
     
     def connect(self) -> duckdb.DuckDBPyConnection:
         if self._conn is None:
@@ -491,19 +516,15 @@ class QuantDB:
     ) -> None:
         """更新表参数 (最后更新时间)"""
         error_val = 'NULL' if not error_message else f"'{error_message}'"
+        now = datetime.now()
         
-        sql = f"""
+        # 先删除后插入（避免 ON CONFLICT 语法兼容问题）
+        self.execute(f"DELETE FROM meta_table_params WHERE layer = '{layer}' AND table_name = '{table_name}' AND source = '{source}'")
+        self.execute(f"""
             INSERT INTO meta_table_params 
-            (layer, table_name, source, last_update_time, last_update_records, status, error_message)
-            VALUES ('{layer}', '{table_name}', '{source}', CURRENT_TIMESTAMP, {records}, '{status}', {error_val})
-            ON CONFLICT(layer, table_name, source) DO UPDATE SET
-                last_update_time = CURRENT_TIMESTAMP,
-                last_update_records = {records},
-                status = '{status}',
-                error_message = {error_val},
-                updated_at = CURRENT_TIMESTAMP
-        """
-        self.execute(sql)
+            (layer, table_name, source, last_update_time, last_update_records, status, error_message, created_at, updated_at)
+            VALUES ('{layer}', '{table_name}', '{source}', '{now}', {records}, '{status}', {error_val}, '{now}', '{now}')
+        """)
     
     def get_table_params(self, layer: Optional[str] = None, table_name: Optional[str] = None) -> pd.DataFrame:
         """获取表参数"""
@@ -543,10 +564,15 @@ class QuantDB:
     
     def register_source(self, source: str, source_type: str = "api", priority: int = 1, config: dict = None) -> None:
         config_json = json.dumps(config or {})
+        # 先删除旧记录
+        self.execute(f"DELETE FROM meta_data_sources WHERE source_name = '{source}'")
+        # 计算新ID
+        max_id = self.query("SELECT COALESCE(MAX(id), 0) as max_id FROM meta_data_sources").iloc[0, 0]
+        new_id = int(max_id) + 1
         self.execute(f"""
-            INSERT OR REPLACE INTO meta_data_sources 
-            (source_name, source_type, priority, config, enabled)
-            VALUES ('{source}', '{source_type}', {priority}, '{config_json}', TRUE)
+            INSERT INTO meta_data_sources 
+            (id, source_name, source_type, priority, config, enabled)
+            VALUES ({new_id}, '{source}', '{source_type}', {priority}, '{config_json}', TRUE)
         """)
     
     def get_active_sources(self) -> list[str]:
@@ -565,7 +591,12 @@ class QuantDB:
         self.execute(get_ods_schema(source))
         for table_type in ["calendars", "instruments", "index_components", "daily_ohlcv"]:
             table_name = f"ods_{table_type}_{source}"
-            self.execute(f"INSERT OR REPLACE INTO meta_ods_tables (source, table_type, table_name) VALUES ('{source}', '{table_type}', '{table_name}')")
+            # 先删除后插入
+            self.execute(f"DELETE FROM meta_ods_tables WHERE source = '{source}' AND table_type = '{table_type}'")
+            # 计算新ID
+            max_id = self.query("SELECT COALESCE(MAX(id), 0) as max_id FROM meta_ods_tables").iloc[0, 0]
+            new_id = int(max_id) + 1
+            self.execute(f"INSERT INTO meta_ods_tables (id, source, table_type, table_name) VALUES ({new_id}, '{source}', '{table_type}', '{table_name}')")
     
     def import_ods(self, source: str, table_type: str, df: pd.DataFrame) -> int:
         table_name = f"ods_{table_type}_{source}"
@@ -738,13 +769,16 @@ class QuantDB:
         start_val = 'NULL' if not start_date else f"'{start_date}'"
         end_val = 'NULL' if not end_date else f"'{end_date}'"
         error_val = 'NULL' if not error else f"'{error}'"
+        now = datetime.now()
+        max_id = self.query("SELECT COALESCE(MAX(id), 0) as max_id FROM meta_update_log").iloc[0, 0]
+        new_id = int(max_id) + 1
         self.execute(f"""
             INSERT INTO meta_update_log 
-            (layer, table_name, source, update_type, start_date, end_date, records_total, 
+            (id, layer, table_name, source, update_type, start_date, end_date, records_total, 
              records_success, records_failed, status, error_message, completed_at)
-            VALUES ('{layer}', '{table}', '{source}', '{update_type}', 
+            VALUES ({new_id}, '{layer}', '{table}', '{source}', '{update_type}', 
                     {start_val}, {end_val}, {records}, {records}, 0, '{status}',
-                    {error_val}, CURRENT_TIMESTAMP)
+                    {error_val}, '{now}')
         """)
     
     def get_update_history(self, table: Optional[str] = None, limit: int = 10) -> pd.DataFrame:

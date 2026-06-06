@@ -394,6 +394,18 @@ def main():
     print("初始化完成!")
     print("=" * 60)
     
+    # 显示参数表
+    print("\n" + "-" * 60)
+    print("📋 参数表状态 (meta_table_params)")
+    print("-" * 60)
+    params = db.get_all_table_status()
+    if not params.empty:
+        for _, row in params.iterrows():
+            source_str = f" [{row['source']}]" if row['source'] else ""
+            print(f"  [{row['layer']}] {row['table_name']}{source_str}: {row['freshness']} ({row['last_update_records']} 条)")
+    else:
+        print("  (无记录)")
+    
     info = db.info()
     print(f"\n数据库路径: {args.db}")
     print(f"数据源: {', '.join(info['sources'])}")

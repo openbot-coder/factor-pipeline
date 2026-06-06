@@ -172,6 +172,8 @@ class ETLPipeline:
         conn.commit()
         
         # 记录日志
+        # 更新参数表
+        self.db.update_table_params("DWD", "dwd_calendars", len(df), source)
         self.db.log_update(
             layer="ETL",
             table="dwd_calendars",
@@ -233,6 +235,8 @@ class ETLPipeline:
         
         conn.commit()
         
+        # 更新参数表
+        self.db.update_table_params("DWD", "dwd_instruments", len(df), source)
         self.db.log_update(
             layer="ETL",
             table="dwd_instruments",
@@ -293,14 +297,9 @@ class ETLPipeline:
         
         conn.commit()
         
-        self.db.log_update(
-            layer="ETL",
-            table="dwd_index_components",
-            source=source,
-            update_type="TRANSFORM",
-            records=records_processed,
-            status="SUCCESS",
-        )
+        # 更新参数表
+        self.db.update_table_params("DWD", "dwd_index_components", records_processed, source)
+        
         
         return records_processed
     
@@ -354,6 +353,8 @@ class ETLPipeline:
             )
             conn.commit()
         
+        # 更新参数表
+        self.db.update_table_params("DWD", "dwd_daily_ohlcv", len(records), source)
         self.db.log_update(
             layer="ETL",
             table="dwd_daily_ohlcv",

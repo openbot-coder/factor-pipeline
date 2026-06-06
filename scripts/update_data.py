@@ -362,6 +362,18 @@ def main():
     print("\n" + "-" * 60)
     health_check(db)
     
+    # 参数表
+    print("\n" + "-" * 60)
+    print("📋 参数表状态 (meta_table_params)")
+    print("-" * 60)
+    params = db.get_all_table_status()
+    if not params.empty:
+        for _, row in params.iterrows():
+            source_str = f" [{row['source']}]" if row['source'] else ""
+            print(f"  [{row['layer']}] {row['table_name']}{source_str}: {row['freshness']} ({row['last_update_records']} 条)")
+    else:
+        print("  (无记录)")
+    
     print("=" * 60)
     
     db.close()
