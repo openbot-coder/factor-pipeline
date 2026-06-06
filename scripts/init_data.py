@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
-"""数据初始化脚本 - 初始化量化数据库
+"""数据初始化脚本 - 初始化量化数据库 (分层架构)
 
-这个脚本用于首次设置量化数据库，包括:
-1. 创建数据库Schema
-2. 导入交易日历
-3. 导入股票基础信息
-4. 导入指数成分股
-5. 导入历史K线数据
+采用数仓分层设计:
+- ODS (Operational Data Store): 原始数据层
+- DWD (Data Warehouse Detail): 明细数据层
+- DWS (Data Warehouse Summary): 汇总数据层
+- ADS (Application Data Service): 应用数据层
+- Factors: 因子数据层
 
 Usage:
-    # 全量初始化
+    # 全量初始化 (ODS + DWD + DWS)
     python scripts/init_data.py --mode full --db data/quant.db
 
-    # 仅初始化日历
-    python scripts/init_data.py --mode calendar --db data/quant.db
+    # 仅拉取原始数据到ODS
+    python scripts/init_data.py --mode ods --db data/quant.db
+
+    # 仅清洗转换到DWD
+    python scripts/init_data.py --mode dwd --db data/quant.db
 
     # 仅初始化K线
     python scripts/init_data.py --mode ohlcv --db data/quant.db --start 2020-01-01
-
-    # 仅初始化股票池
-    python scripts/init_data.py --mode indices --db data/quant.db
 """
 
 import argparse
@@ -34,14 +34,14 @@ import pandas as pd
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from factor_pipeline.data.quantdb import QuantDB, Market, IndexCode
+from factor_pipeline.data.quantdb import QuantDB, IndexCode
 
 
 # =============================================================================
-# Data Sources - 数据源配置
+# Configuration - 配置
 # =============================================================================
 
-# 指数列表
+# 指数配置
 INDICES = {
     "000016.SH": {"name": "上证50", "category": "宽基"},
     "000300.SH": {"name": "沪深300", "category": "宽基"},
@@ -49,94 +49,70 @@ INDICES = {
     "000852.SH": {"name": "中证1000", "category": "宽基"},
     "000906.SH": {"name": "中证800", "category": "宽基"},
     "000903.SH": {"name": "中证100", "category": "宽基"},
-    # 申万一级行业
-    "801010": {"name": "农林牧渔", "category": "申万一级"},
-    "801020": {"name": "采掘", "category": "申万一级"},
-    "801030": {"name": "化工", "category": "申万一级"},
-    "801040": {"name": "钢铁", "category": "申万一级"},
-    "801050": {"name": "有色金属", "category": "申万一级"},
-    "801080": {"name": "电子", "category": "申万一级"},
-    "801110": {"name": "家用电器", "category": "申万一级"},
-    "801120": {"name": "食品饮料", "category": "申万一级"},
-    "801130": {"name": "纺织服装", "category": "申万一级"},
-    "801140": {"name": "轻工制造", "category": "申万一级"},
-    "801150": {"name": "医药生物", "category": "申万一级"},
-    "801160": {"name": "汽车", "category": "申万一级"},
-    "801170": {"name": "公用事业", "category": "申万一级"},
-    "801180": {"name": "房地产", "category": "申万一级"},
-    "801200": {"name": "商业贸易", "category": "申万一级"},
-    "801210": {"name": "餐饮旅游", "category": "申万一级"},
-    "801230": {"name": "建筑材料", "category": "申万一级"},
-    "801710": {"name": "建筑装饰", "category": "申万一级"},
-    "801720": {"name": "电气设备", "category": "申万一级"},
-    "801730": {"name": "国防军工", "category": "申万一级"},
-    "801740": {"name": "计算机", "category": "申万一级"},
-    "801750": {"name": "电子", "category": "申万一级"},
-    "801760": {"name": "传媒", "category": "申万一级"},
-    "801770": {"name": "通信", "category": "申万一级"},
-    "801780": {"name": "非银金融", "category": "申万一级"},
-    "801790": {"name": "银行", "category": "申万一级"},
-    "801880": {"name": "汽车", "category": "申万一级"},
-    "801950": {"name": "煤炭", "category": "申万一级"},
-    "801960": {"name": "石油石化", "category": "申万一级"},
-    "801970": {"name": "环保", "category": "申万一级"},
-    "801980": {"name": "美容护理", "category": "申万一级"},
 }
+
+# 申万一级行业
+SW_INDUSTRIES = [
+    ("801010", "农林牧渔"),
+    ("801020", "采掘"),
+    ("801030", "化工"),
+    ("801040", "钢铁"),
+    ("801050", "有色金属"),
+    ("801080", "电子"),
+    ("801110", "家用电器"),
+    ("801120", "食品饮料"),
+    ("801130", "纺织服装"),
+    ("801140", "轻工制造"),
+    ("801150", "医药生物"),
+    ("801160", "汽车"),
+    ("801170", "公用事业"),
+    ("801180", "房地产"),
+    ("801200", "商业贸易"),
+    ("801210", "餐饮旅游"),
+    ("801230", "建筑材料"),
+    ("801710", "建筑装饰"),
+    ("801720", "电气设备"),
+    ("801730", "国防军工"),
+    ("801740", "计算机"),
+    ("801750", "电子"),
+    ("801760", "传媒"),
+    ("801770", "通信"),
+    ("801780", "非银金融"),
+    ("801790", "银行"),
+    ("801880", "汽车"),
+    ("801950", "煤炭"),
+    ("801960", "石油石化"),
+    ("801970", "环保"),
+    ("801980", "美容护理"),
+]
 
 
 # =============================================================================
-# Calendar Generator - 日历生成器
+# ODS Fetcher - 原始数据拉取
 # =============================================================================
 
 def generate_trading_calendar(start_year: int = 2005, end_year: int = None) -> pd.DataFrame:
-    """生成A股交易日历
-    
-    基于中国A股实际交易规则生成日历:
-    - 周一到周五交易
-    - 排除周末
-    - 排除法定节假日（简化版）
-    
-    Args:
-        start_year: 开始年份
-        end_year: 结束年份
-        
-    Returns:
-        日历DataFrame
-    """
+    """生成A股交易日历"""
     if end_year is None:
         end_year = date.today().year
     
-    # 法定节假日（简化，只排除大部分）
+    # 法定节假日
     holidays = set()
     
-    # 添加已知的固定假期（简化处理）
     for year in range(start_year, end_year + 1):
-        # 元旦
         holidays.add(f"{year}-01-01")
         holidays.add(f"{year}-01-02")
         holidays.add(f"{year}-01-03")
-        
-        # 春节（简化，排除第一周）
         for day in range(1, 8):
             holidays.add(f"{year}-02-{day:02d}")
-        
-        # 清明
         holidays.add(f"{year}-04-04")
         holidays.add(f"{year}-04-05")
         holidays.add(f"{year}-04-06")
-        
-        # 劳动节
         holidays.add(f"{year}-05-01")
         holidays.add(f"{year}-05-02")
         holidays.add(f"{year}-05-03")
-        
-        # 端午（简化）
         holidays.add(f"{year}-06-{22 + year % 3:02d}")
-        
-        # 中秋（简化）
         holidays.add(f"{year}-09-{15 + year % 2:02d}")
-        
-        # 国庆
         for day in range(1, 8):
             holidays.add(f"{year}-10-{day:02d}")
     
@@ -145,46 +121,31 @@ def generate_trading_calendar(start_year: int = 2005, end_year: int = None) -> p
     end = date(end_year + 1, 1, 1)
     
     while current < end:
-        # 周一到周五
         if current.weekday() < 5:
             date_str = current.strftime("%Y-%m-%d")
-            # 排除节假日
-            is_trading = date_str not in holidays
             records.append({
                 "date": date_str,
-                "is_trading_day": is_trading,
                 "exchange": "ALL",
+                "is_trading_day": date_str not in holidays,
+                "fetched_at": datetime.now(),
             })
         current += timedelta(days=1)
     
     return pd.DataFrame(records)
 
 
-# =============================================================================
-# Instrument Fetcher - 股票信息获取器
-# =============================================================================
-
 def fetch_instruments_baostock() -> pd.DataFrame:
-    """从baostock获取股票列表
-    
-    Returns:
-        股票信息DataFrame
-    """
+    """从baostock获取股票列表"""
     try:
         import baostock as bs
         
-        # 登录
         lg = bs.login()
-        if lg.error_code != "0":
-            raise Exception(f"Baostock login failed: {lg.error_msg}")
-        
-        # 获取所有股票
         rs = bs.query_all_stock(day=date.today().strftime("%Y-%m-%d"))
         
         records = []
         while rs.error_code == "0" and rs.next():
             row = rs.get_row_data()
-            if row[1] in ["1", "2", "3", "4", "5"]:  # A股
+            if row[1] in ["1", "2", "3", "4", "5"]:
                 code = row[0].split(".")[1]
                 exchange = "SSE" if row[0].startswith("sh") else "SZSE"
                 records.append({
@@ -193,37 +154,21 @@ def fetch_instruments_baostock() -> pd.DataFrame:
                     "list_date": None,
                     "delist_date": None,
                     "market": exchange,
-                    "industry_sw": None,
-                    "industry_sw_2": None,
-                    "industry_sw_3": None,
-                    "sector": None,
+                    "fetched_at": datetime.now(),
                 })
         
         bs.logout()
-        
-        if not records:
-            raise Exception("No stocks fetched from baostock")
-        
         return pd.DataFrame(records)
     
     except ImportError:
-        print("⚠️ baostock not installed, using empty instruments")
-        return pd.DataFrame(columns=[
-            "symbol", "name", "list_date", "delist_date", 
-            "market", "industry_sw", "industry_sw_2", "industry_sw_3", "sector"
-        ])
+        return pd.DataFrame()
 
 
 def fetch_instruments_akshare() -> pd.DataFrame:
-    """从AKShare获取股票列表
-    
-    Returns:
-        股票信息DataFrame
-    """
+    """从AKShare获取股票列表"""
     try:
         import akshare as ak
         
-        # 获取A股列表
         df = ak.stock_info_a_code_name()
         
         records = []
@@ -236,10 +181,7 @@ def fetch_instruments_akshare() -> pd.DataFrame:
                 "list_date": None,
                 "delist_date": None,
                 "market": exchange,
-                "industry_sw": None,
-                "industry_sw_2": None,
-                "industry_sw_3": None,
-                "sector": None,
+                "fetched_at": datetime.now(),
             })
         
         return pd.DataFrame(records)
@@ -248,28 +190,13 @@ def fetch_instruments_akshare() -> pd.DataFrame:
         return pd.DataFrame()
 
 
-# =============================================================================
-# Index Fetcher - 指数成分获取器
-# =============================================================================
-
 def fetch_index_components_baostock(index_code: str) -> pd.DataFrame:
-    """从baostock获取指数成分股
-    
-    Args:
-        index_code: 指数代码，如 'sh.000300'
-        
-    Returns:
-        成分股权重DataFrame
-    """
+    """从baostock获取指数成分股"""
     try:
         import baostock as bs
         
-        # 转换代码格式
         bs_code = index_code.replace(".SH", ".sh").replace(".SZ", ".sz")
-        
         lg = bs.login()
-        if lg.error_code != "0":
-            raise Exception(f"Baostock login failed: {lg.error_msg}")
         
         rs = bs.query_index_stock_weight(bs_code)
         
@@ -278,67 +205,39 @@ def fetch_index_components_baostock(index_code: str) -> pd.DataFrame:
             row = rs.get_row_data()
             code = row["stockCode"].split(".")[1]
             exchange = "SSE" if row["stockCode"].startswith("sh") else "SZSE"
+            index_name = INDICES.get(index_code, {}).get("name", index_code)
             records.append({
                 "index_code": index_code,
+                "index_name": index_name,
                 "symbol": f"{code}.{exchange}",
                 "in_date": row["inDate"],
                 "out_date": None if row["outDate"] == "" else row["outDate"],
                 "weight": float(row["weight"]) if row["weight"] else 0.0,
+                "source": "baostock",
+                "fetched_at": datetime.now(),
             })
         
         bs.logout()
-        
         return pd.DataFrame(records)
     
     except ImportError:
         return pd.DataFrame()
 
 
-def fetch_index_components_tushare(index_code: str) -> pd.DataFrame:
-    """从Tushare获取指数成分股
-    
-    Args:
-        index_code: 指数代码
-        
-    Returns:
-        成分股权重DataFrame
-    """
-    # Tushare需要token，这里提供框架
-    return pd.DataFrame()
-
-
-# =============================================================================
-# OHLCV Fetcher - K线数据获取器
-# =============================================================================
-
 def fetch_ohlcv_baostock(
     symbols: list[str],
     start: str,
     end: str,
-    adjust: str = "3",  # 3=前复权
+    adjust: str = "2",  # 2=前复权
 ) -> pd.DataFrame:
-    """从baostock获取K线数据
-    
-    Args:
-        symbols: 股票代码列表
-        start: 开始日期
-        end: 结束日期
-        adjust: 复权类型 1=后复权 2=前复权 3=不复权
-        
-    Returns:
-        K线DataFrame
-    """
+    """从baostock获取K线数据"""
     try:
         import baostock as bs
         
         lg = bs.login()
-        if lg.error_code != "0":
-            raise Exception(f"Baostock login failed: {lg.error_msg}")
-        
         all_records = []
         
         for symbol in symbols:
-            # 转换代码格式
             bs_code = f"sh.{symbol}" if ".SH" in symbol else f"sz.{symbol}"
             
             rs = bs.query_history_k_data_plus(
@@ -352,7 +251,6 @@ def fetch_ohlcv_baostock(
             
             while rs.error_code == "0" and rs.next():
                 row = rs.get_row_data()
-                code = symbol.split(".")[0]
                 all_records.append({
                     "date": row[0],
                     "symbol": symbol,
@@ -364,10 +262,12 @@ def fetch_ohlcv_baostock(
                     "amount": float(row[6]) if row[6] else 0,
                     "turnover_rate": float(row[7]) if row[7] else 0,
                     "pct_change": float(row[8]) if row[8] else 0,
+                    "adjust_flag": adjust,
+                    "source": "baostock",
+                    "fetched_at": datetime.now(),
                 })
         
         bs.logout()
-        
         return pd.DataFrame(all_records)
     
     except ImportError:
@@ -380,21 +280,10 @@ def fetch_ohlcv_akshare(
     end: str,
     adjust: str = "qfq",
 ) -> pd.DataFrame:
-    """从AKShare获取K线数据
-    
-    Args:
-        symbol: 股票代码
-        start: 开始日期
-        end: 结束日期
-        adjust: 复权类型 qfq=前复权 hfq=后复权 None=不复权
-        
-    Returns:
-        K线DataFrame
-    """
+    """从AKShare获取K线数据"""
     try:
         import akshare as ak
         
-        # 转换代码
         code = symbol.split(".")[0]
         
         df = ak.stock_zh_a_hist(
@@ -407,10 +296,8 @@ def fetch_ohlcv_akshare(
         if df is None or df.empty:
             return pd.DataFrame()
         
-        # 重命名列
         df = df.rename(columns={
             "日期": "date",
-            "股票代码": "symbol",
             "开盘": "open",
             "收盘": "close",
             "最高": "high",
@@ -423,11 +310,175 @@ def fetch_ohlcv_akshare(
         
         df["symbol"] = symbol
         df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
+        df["adjust_flag"] = "2" if adjust == "qfq" else "1"
+        df["source"] = "akshare"
+        df["fetched_at"] = datetime.now()
         
-        return df[["date", "symbol", "open", "high", "low", "close", "volume", "amount", "turnover_rate", "pct_change"]]
+        return df[["date", "symbol", "open", "high", "low", "close", "volume", 
+                   "amount", "turnover_rate", "pct_change", "adjust_flag", "source", "fetched_at"]]
     
     except ImportError:
         return pd.DataFrame()
+
+
+# =============================================================================
+# Init Functions - 初始化函数
+# =============================================================================
+
+def init_ods_calendars(db: QuantDB, args) -> int:
+    """初始化ODS日历"""
+    print("📅 [ODS] 拉取交易日历...")
+    start_time = datetime.now()
+    
+    df = generate_trading_calendar(2005, date.today().year)
+    print(f"   生成 {len(df)} 条日历记录")
+    
+    rows = db.import_ods_calendars(df, source="generated")
+    
+    end_time = datetime.now()
+    print(f"✅ [ODS] 日历导入完成: {rows} 条 ({(end_time - start_time).total_seconds():.2f}s)")
+    return rows
+
+
+def init_ods_instruments(db: QuantDB, args) -> int:
+    """初始化ODS股票信息"""
+    print("📋 [ODS] 拉取股票列表...")
+    start_time = datetime.now()
+    
+    if args.source == "baostock":
+        df = fetch_instruments_baostock()
+    else:
+        df = fetch_instruments_akshare()
+    
+    if df.empty:
+        print("⚠️ 未获取到股票信息")
+        return 0
+    
+    print(f"   获取 {len(df)} 只股票")
+    rows = db.import_ods_instruments(df, source=args.source)
+    
+    print(f"✅ [ODS] 股票信息导入完成: {rows} 条 ({(datetime.now() - start_time).total_seconds():.2f}s)")
+    return rows
+
+
+def init_ods_index_components(db: QuantDB, args) -> int:
+    """初始化ODS指数成分"""
+    print("📊 [ODS] 拉取指数成分...")
+    start_time = datetime.now()
+    
+    total = 0
+    for code in INDICES.keys():
+        print(f"   获取 {code} ({INDICES[code]['name']})...")
+        df = fetch_index_components_baostock(code)
+        if not df.empty:
+            db.import_ods_index_components(df, source="baostock")
+            total += len(df)
+    
+    print(f"✅ [ODS] 指数成分导入完成: {total} 条 ({(datetime.now() - start_time).total_seconds():.2f}s)")
+    return total
+
+
+def init_ods_ohlcv(db: QuantDB, args) -> int:
+    """初始化ODS K线数据"""
+    print("📈 [ODS] 拉取K线数据...")
+    start_time = datetime.now()
+    
+    end = args.end or date.today().strftime("%Y-%m-%d")
+    
+    df = db.get_instruments()
+    symbols = df["symbol"].tolist() if not df.empty else []
+    
+    print(f"   股票数: {len(symbols)}, 日期范围: {args.start} ~ {end}")
+    
+    total = 0
+    batch_size = 50
+    
+    for i in range(0, min(len(symbols), 100), batch_size):
+        batch = symbols[i:i + batch_size]
+        print(f"   处理 {i + 1} ~ {i + len(batch)}...")
+        
+        if args.source == "baostock":
+            ohlcv_df = fetch_ohlcv_baostock(batch, args.start, end, adjust="2")
+        else:
+            all_dfs = []
+            for sym in batch:
+                ohlcv_df = fetch_ohlcv_akshare(sym, args.start, end)
+                if not ohlcv_df.empty:
+                    all_dfs.append(ohlcv_df)
+            ohlcv_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
+        
+        if not ohlcv_df.empty:
+            db.import_ods_ohlcv(ohlcv_df, source=args.source)
+            total += len(ohlcv_df)
+    
+    print(f"✅ [ODS] K线导入完成: {total} 条 ({(datetime.now() - start_time).total_seconds():.2f}s)")
+    return total
+
+
+def init_dwd(db: QuantDB, args) -> dict:
+    """初始化DWD明细数据层"""
+    print("\n" + "=" * 50)
+    print("🔄 [DWD] 清洗转换数据...")
+    print("=" * 50)
+    start_time = datetime.now()
+    
+    results = {}
+    
+    print("📅 转换日历...")
+    results["calendars"] = db.transform_calendars_ods_to_dwd()
+    print(f"   ✅ {results['calendars']} 条")
+    
+    print("📋 转换股票信息...")
+    results["instruments"] = db.transform_instruments_ods_to_dwd()
+    print(f"   ✅ {results['instruments']} 条")
+    
+    print("📊 转换指数成分...")
+    results["index_components"] = db.transform_index_components_ods_to_dwd()
+    print(f"   ✅ {results['index_components']} 条")
+    
+    print("📈 转换K线数据 (前复权)...")
+    results["ohlcv"] = db.transform_ohlcv_ods_to_dwd()
+    print(f"   ✅ {results['ohlcv']} 条")
+    
+    print(f"\n✅ [DWD] 转换完成 ({(datetime.now() - start_time).total_seconds():.2f}s)")
+    return results
+
+
+def init_dws(db: QuantDB, args) -> dict:
+    """初始化DWS汇总数据层"""
+    print("\n" + "=" * 50)
+    print("🔄 [DWS] 聚合汇总数据...")
+    print("=" * 50)
+    start_time = datetime.now()
+    
+    results = {}
+    
+    print("📊 聚合月度统计...")
+    results["monthly"] = db.aggregate_monthly_stats()
+    print(f"   ✅ {results['monthly']} 条")
+    
+    print(f"\n✅ [DWS] 汇总完成 ({(datetime.now() - start_time).total_seconds():.2f}s)")
+    return results
+
+
+def validate_data(db: QuantDB) -> dict:
+    """校验数据"""
+    print("\n" + "=" * 50)
+    print("🔍 [校验] 数据质量检查...")
+    print("=" * 50)
+    
+    results = db.validate_all()
+    
+    passed = sum(1 for r in results if r.passed)
+    failed = len(results) - passed
+    
+    print(f"\n校验结果: {passed} 通过, {failed} 失败")
+    
+    for r in results:
+        status = "✅" if r.passed else "❌"
+        print(f"   {status} {r.rule.name}: {r.actual}")
+    
+    return {"total": len(results), "passed": passed, "failed": failed}
 
 
 # =============================================================================
@@ -437,211 +488,27 @@ def fetch_ohlcv_akshare(
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
-        description="初始化量化数据库",
+        description="初始化量化数据库 (分层架构)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     
-    parser.add_argument(
-        "--db",
-        type=str,
-        default="data/quant.db",
-        help="数据库路径 (default: data/quant.db)",
-    )
+    parser.add_argument("--db", type=str, default="data/quant.db", help="数据库路径")
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["full", "calendar", "instruments", "indices", "ohlcv"],
+        choices=["full", "ods", "dwd", "dws", "validate", "calendar", "instruments", "indices", "ohlcv"],
         default="full",
         help="初始化模式",
     )
-    parser.add_argument(
-        "--start",
-        type=str,
-        default="2005-01-01",
-        help="K线开始日期 (default: 2005-01-01)",
-    )
-    parser.add_argument(
-        "--end",
-        type=str,
-        default=None,
-        help="K线结束日期 (default: today)",
-    )
-    parser.add_argument(
-        "--source",
-        type=str,
-        choices=["baostock", "akshare"],
-        default="baostock",
-        help="数据源 (default: baostock)",
-    )
-    parser.add_argument(
-        "--symbols",
-        type=str,
-        nargs="+",
-        default=None,
-        help="指定股票代码 (为空则获取全部)",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=10000,
-        help="批量导入大小 (default: 10000)",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="强制重新初始化",
-    )
+    parser.add_argument("--start", type=str, default="2005-01-01", help="K线开始日期")
+    parser.add_argument("--end", type=str, default=None, help="K线结束日期")
+    parser.add_argument("--source", type=str, choices=["baostock", "akshare"], default="baostock", help="数据源")
+    parser.add_argument("--symbols", type=str, nargs="+", default=None, help="指定股票代码")
+    parser.add_argument("--batch-size", type=int, default=10000, help="批量导入大小")
+    parser.add_argument("--force", action="store_true", help="强制重新初始化")
+    parser.add_argument("--skip-validation", action="store_true", help="跳过校验")
     
     return parser.parse_args()
-
-
-def init_calendar(db: QuantDB, args) -> int:
-    """初始化日历"""
-    print("📅 初始化交易日历...")
-    start_time = datetime.now()
-    
-    start_year = 2005
-    end_year = date.today().year if not args.end else int(args.end.split("-")[0])
-    
-    df = generate_trading_calendar(start_year, end_year)
-    print(f"   生成 {len(df)} 条日历记录 ({start_year}-{end_year})")
-    
-    rows = db.import_calendars(df)
-    
-    end_time = datetime.now()
-    duration = (end_time - start_time).total_seconds()
-    print(f"✅ 日历导入完成: {rows} 条 ({duration:.2f}s)")
-    
-    return rows
-
-
-def init_instruments(db: QuantDB, args) -> int:
-    """初始化股票信息"""
-    print("📋 初始化股票信息...")
-    start_time = datetime.now()
-    
-    if args.source == "baostock":
-        df = fetch_instruments_baostock()
-    else:
-        df = fetch_instruments_akshare()
-    
-    if df.empty:
-        print("⚠️ 未获取到股票信息，跳过")
-        return 0
-    
-    print(f"   获取 {len(df)} 只股票")
-    
-    rows = db.import_instruments(df)
-    
-    end_time = datetime.now()
-    duration = (end_time - start_time).total_seconds()
-    print(f"✅ 股票信息导入完成: {rows} 条 ({duration:.2f}s)")
-    
-    return rows
-
-
-def init_indices(db: QuantDB, args) -> int:
-    """初始化指数信息"""
-    print("📊 初始化指数信息...")
-    start_time = datetime.now()
-    
-    # 保存指数基础信息
-    indices_records = []
-    for code, info in INDICES.items():
-        indices_records.append({
-            "index_code": code if "." in code else f"{code}.SH",
-            "index_name": info["name"],
-            "index_full_name": info["name"],
-            "base_date": "2004-12-31",
-            "base_point": 1000,
-            "exchange": "SSE",
-            "category": info["category"],
-        })
-    
-    indices_df = pd.DataFrame(indices_records)
-    
-    # 导入指数信息
-    conn = db.connect()
-    for _, row in indices_df.iterrows():
-        try:
-            conn.execute(f"""
-                INSERT OR REPLACE INTO indices 
-                (index_code, index_name, index_full_name, base_date, base_point, exchange, category)
-                VALUES ('{row['index_code']}', '{row['index_name']}', '{row['index_full_name']}',
-                        '{row['base_date']}', {row['base_point']}, '{row['exchange']}', '{row['category']}')
-            """)
-        except Exception:
-            pass
-    conn.commit()
-    
-    # 获取成分股
-    total_components = 0
-    for code in list(INDICES.keys())[:10]:  # 限制数量避免超时
-        full_code = code if "." in code else f"{code}.SH"
-        print(f"   获取 {full_code} 成分股...")
-        
-        if args.source == "baostock":
-            components_df = fetch_index_components_baostock(full_code)
-        else:
-            components_df = fetch_index_components_tushare(full_code)
-        
-        if not components_df.empty:
-            db.import_index_components(components_df)
-            total_components += len(components_df)
-    
-    end_time = datetime.now()
-    duration = (end_time - start_time).total_seconds()
-    print(f"✅ 指数信息导入完成: {len(INDICES)} 指数, {total_components} 成分股 ({duration:.2f}s)")
-    
-    return total_components
-
-
-def init_ohlcv(db: QuantDB, args) -> int:
-    """初始化K线数据"""
-    print("📈 初始化K线数据...")
-    start_time = datetime.now()
-    
-    # 确定日期范围
-    end = args.end or date.today().strftime("%Y-%m-%d")
-    
-    # 获取股票列表
-    if args.symbols:
-        symbols = args.symbols
-    else:
-        df = db.get_instruments()
-        symbols = df["symbol"].tolist()
-    
-    print(f"   将获取 {len(symbols)} 只股票的K线数据")
-    print(f"   日期范围: {args.start} ~ {end}")
-    
-    # 分批获取
-    total_records = 0
-    batch_size = 50  # 每批处理的股票数
-    
-    for i in range(0, min(len(symbols), 100), batch_size):  # 限制总数避免超时
-        batch = symbols[i:i + batch_size]
-        print(f"   处理 {i + 1} ~ {i + len(batch)} 只股票...")
-        
-        if args.source == "baostock":
-            df = fetch_ohlcv_baostock(batch, args.start, end)
-        else:
-            # AKShare每次只能获取一只股票
-            all_dfs = []
-            for sym in batch:
-                df = fetch_ohlcv_akshare(sym, args.start, end)
-                if not df.empty:
-                    all_dfs.append(df)
-            df = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
-        
-        if not df.empty:
-            rows = db.import_ohlcv(df, batch_size=args.batch_size)
-            total_records += rows
-    
-    end_time = datetime.now()
-    duration = (end_time - start_time).total_seconds()
-    print(f"✅ K线数据导入完成: {total_records} 条记录 ({duration:.2f}s)")
-    
-    return total_records
 
 
 def main():
@@ -649,7 +516,11 @@ def main():
     args = parse_args()
     
     print("=" * 60)
-    print("量化数据库初始化")
+    print("量化数据库初始化 (分层架构)")
+    print("=" * 60)
+    print(f"数据库: {args.db}")
+    print(f"模式: {args.mode}")
+    print(f"数据源: {args.source}")
     print("=" * 60)
     
     # 确保目录存在
@@ -664,24 +535,38 @@ def main():
     
     results = {}
     
-    # 根据模式执行初始化
-    if args.mode == "full":
-        results["calendar"] = init_calendar(db, args)
-        results["instruments"] = init_instruments(db, args)
-        results["indices"] = init_indices(db, args)
-        results["ohlcv"] = init_ohlcv(db, args)
+    # ODS层
+    if args.mode in ["full", "ods"]:
+        results["ods_calendars"] = init_ods_calendars(db, args)
+        results["ods_instruments"] = init_ods_instruments(db, args)
+        results["ods_index_components"] = init_ods_index_components(db, args)
+        results["ods_ohlcv"] = init_ods_ohlcv(db, args)
     
     elif args.mode == "calendar":
-        results["calendar"] = init_calendar(db, args)
+        results["ods_calendars"] = init_ods_calendars(db, args)
     
     elif args.mode == "instruments":
-        results["instruments"] = init_instruments(db, args)
+        results["ods_instruments"] = init_ods_instruments(db, args)
     
     elif args.mode == "indices":
-        results["indices"] = init_indices(db, args)
+        results["ods_index_components"] = init_ods_index_components(db, args)
     
     elif args.mode == "ohlcv":
-        results["ohlcv"] = init_ohlcv(db, args)
+        results["ods_ohlcv"] = init_ods_ohlcv(db, args)
+    
+    # DWD层
+    if args.mode in ["full", "dwd"]:
+        results["dwd"] = init_dwd(db, args)
+    
+    # DWS层
+    if args.mode in ["full", "dws"]:
+        results["dws"] = init_dws(db, args)
+    
+    # 校验
+    if args.mode == "validate":
+        results["validation"] = validate_data(db)
+    elif args.mode == "full" and not args.skip_validation:
+        results["validation"] = validate_data(db)
     
     # 显示最终统计
     print("\n" + "=" * 60)
@@ -690,8 +575,10 @@ def main():
     
     info = db.info()
     print("\n数据库信息:")
-    for table, data in info["tables"].items():
-        print(f"   {table}: {data['rows']} 条记录")
+    for layer, tables in info.items():
+        print(f"\n  [{layer}]")
+        for table, data in tables.items():
+            print(f"    {table}: {data['rows']} 条")
     
     print(f"\n数据库路径: {args.db}")
     
