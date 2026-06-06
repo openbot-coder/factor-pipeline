@@ -1,46 +1,38 @@
 #!/usr/bin/env python3
-"""日更新脚本 - 增量更新量化数据库 (3层架构)
+"""日更新脚本 - 增量更新量化数据库 (3层架构 + ETL分离)
 
 分层更新策略:
 - ODS: 拉取最新原始数据
-- DWD: 增量转换清洗数据
-- APP: 更新汇总统计和因子
-- DWD: 增量转换清洗数据
+- ETL: 独立的迁移脚本
 - APP: 更新汇总统计
-- 校验: 数据质量检查
 
 Usage:
     # 更新所有层
     python scripts/update_data.py --db data/quant.db
 
-    # 仅更新ODS原始数据
-    python scripts/update_data.py --db data/quant.db --ods-only
+    # 仅拉取K线到ODS
+    python scripts/update_data.py --db data/quant.db --ods-ohlcv
 
-    # 仅更新K线并校验
-    python scripts/update_data.py --db data/quant.db --ohlcv --validate
+    # 仅执行ETL迁移
+    python scripts/update_data.py --db data/quant.db --etl
 
     # 仅执行校验
     python scripts/update_data.py --db data/quant.db --check
-
-    # 定时任务示例 (crontab)
-    # 每天 16:30 执行 (A股收盘后)
-    # 30 16 * * 1-5 python /path/to/update_data.py --db /data/quant.db --ohlcv
 """
 
 import argparse
 import logging
 import sys
-import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from factor_pipeline.data.quantdb import QuantDB, ValidationResult
+from factor_pipeline.data.quantdb import QuantDB
+from factor_pipeline.data.etl import ETLPipeline
 
 
 # =============================================================================
@@ -48,7 +40,6 @@ from factor_pipeline.data.quantdb import QuantDB, ValidationResult
 # =============================================================================
 
 def setup_logger(name: str = "update_data") -> logging.Logger:
-    """设置日志"""
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
     
@@ -66,207 +57,146 @@ logger = setup_logger()
 
 
 # =============================================================================
-# ODS Updater - 原始数据层更新
+# Data Fetchers - 数据拉取
 # =============================================================================
 
-def update_ods_calendars(db: QuantDB, days: int = 7) -> int:
-    """更新日历 (ODS)"""
-    logger.info("📅 [ODS] 检查交易日历更新...")
-    
+def fetch_recent_ohlcv_baostock(
+    symbols: list[str],
+    days: int = 5,
+) -> pd.DataFrame:
+    """从baostock获取最近K线数据"""
+    try:
+        import baostock as bs
+        
+        end_date = date.today().strftime("%Y-%m-%d")
+        start_date = (date.today() - timedelta(days=days)).strftime("%Y-%m-%d")
+        
+        lg = bs.login()
+        all_records = []
+        
+        for symbol in symbols:
+            bs_code = f"sh.{symbol}" if ".SH" in symbol else f"sz.{symbol}"
+            
+            rs = bs.query_history_k_data_plus(
+                bs_code,
+                "date,open,high,low,close,volume,amount,turnover,pctChg",
+                start_date=start_date,
+                end_date=end_date,
+                frequency="d",
+                adjustflag="2",  # 前复权
+            )
+            
+            while rs.error_code == "0" and rs.next():
+                row = rs.get_row_data()
+                all_records.append({
+                    "date": row[0],
+                    "symbol": symbol,
+                    "open": float(row[1]) if row[1] else 0,
+                    "high": float(row[2]) if row[2] else 0,
+                    "low": float(row[3]) if row[3] else 0,
+                    "close": float(row[4]) if row[4] else 0,
+                    "volume": float(row[5]) if row[5] else 0,
+                    "amount": float(row[6]) if row[6] else 0,
+                    "turnover_rate": float(row[7]) if row[7] else 0,
+                    "pct_change": float(row[8]) if row[8] else 0,
+                    "adjust_flag": "2",
+                })
+        
+        bs.logout()
+        return pd.DataFrame(all_records)
+    except ImportError:
+        return pd.DataFrame()
+
+
+def generate_new_calendar_dates(db: QuantDB, source: str) -> pd.DataFrame:
+    """生成新的日历日期"""
     trading_days = db.get_trading_days()
     latest_date = max(trading_days) if trading_days else "2005-01-01"
-    logger.info(f"   最新日历日期: {latest_date}")
     
     today = date.today()
     latest = datetime.strptime(latest_date, "%Y-%m-%d").date()
     
     if latest >= today:
-        logger.info("   日历已是最新")
-        return 0
+        return pd.DataFrame()
     
-    new_dates = []
+    records = []
     current = latest + timedelta(days=1)
     while current <= today:
         if current.weekday() < 5:
-            new_dates.append({
+            records.append({
                 "date": current.strftime("%Y-%m-%d"),
                 "exchange": "ALL",
                 "is_trading_day": True,
-                "fetched_at": datetime.now(),
             })
         current += timedelta(days=1)
     
-    if not new_dates:
-        return 0
-    
-    df = pd.DataFrame(new_dates)
-    rows = db.import_ods_calendars(df, source="generated")
-    logger.info(f"✅ [ODS] 日历更新: +{rows} 条")
-    return rows
-
-
-def update_ods_ohlcv(db: QuantDB, source: str = "baostock", days: int = 5) -> int:
-    """更新K线数据 (ODS)"""
-    logger.info(f"📈 [ODS] 从 {source} 更新K线数据...")
-    
-    end_date = date.today().strftime("%Y-%m-%d")
-    start_date = (date.today() - timedelta(days=days)).strftime("%Y-%m-%d")
-    
-    df = db.get_instruments(active_only=True)
-    symbols = df["symbol"].tolist()
-    logger.info(f"   活跃股票: {len(symbols)}")
-    
-    try:
-        if source == "baostock":
-            import baostock as bs
-            
-            lg = bs.login()
-            total = 0
-            updated = 0
-            
-            for symbol in symbols[:100]:
-                try:
-                    bs_code = f"sh.{symbol}" if ".SH" in symbol else f"sz.{symbol}"
-                    
-                    rs = bs.query_history_k_data_plus(
-                        bs_code,
-                        "date,open,high,low,close,volume,amount,turnover,pctChg",
-                        start_date=start_date,
-                        end_date=end_date,
-                        frequency="d",
-                        adjustflag="2",
-                    )
-                    
-                    records = []
-                    while rs.error_code == "0" and rs.next():
-                        row = rs.get_row_data()
-                        records.append({
-                            "date": row[0],
-                            "symbol": symbol,
-                            "open": float(row[1]) if row[1] else 0,
-                            "high": float(row[2]) if row[2] else 0,
-                            "low": float(row[3]) if row[3] else 0,
-                            "close": float(row[4]) if row[4] else 0,
-                            "volume": float(row[5]) if row[5] else 0,
-                            "amount": float(row[6]) if row[6] else 0,
-                            "turnover_rate": float(row[7]) if row[7] else 0,
-                            "pct_change": float(row[8]) if row[8] else 0,
-                            "adjust_flag": "2",
-                            "source": "baostock",
-                            "fetched_at": datetime.now(),
-                        })
-                    
-                    if records:
-                        db.import_ods_ohlcv(pd.DataFrame(records), source="baostock")
-                        total += len(records)
-                        updated += 1
-                        
-                except Exception:
-                    pass
-            
-            bs.logout()
-            logger.info(f"✅ [ODS] K线更新: {updated} 只股票, {total} 条记录")
-            return total
-            
-        else:  # akshare
-            import akshare as ak
-            
-            total = 0
-            updated = 0
-            
-            for symbol in symbols[:50]:
-                try:
-                    code = symbol.split(".")[0]
-                    
-                    df = ak.stock_zh_a_hist(
-                        symbol=code,
-                        start_date=start_date.replace("-", ""),
-                        end_date=end_date.replace("-", ""),
-                        adjust="qfq",
-                    )
-                    
-                    if df is not None and not df.empty:
-                        df = df.rename(columns={
-                            "日期": "date",
-                            "开盘": "open",
-                            "收盘": "close",
-                            "最高": "high",
-                            "最低": "low",
-                            "成交量": "volume",
-                            "成交额": "amount",
-                            "换手率": "turnover_rate",
-                            "涨跌幅": "pct_change",
-                        })
-                        df["symbol"] = symbol
-                        df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
-                        df["adjust_flag"] = "2"
-                        df["source"] = "akshare"
-                        df["fetched_at"] = datetime.now()
-                        
-                        db.import_ods_ohlcv(df, source="akshare")
-                        total += len(df)
-                        updated += 1
-                        
-                except Exception:
-                    pass
-            
-            logger.info(f"✅ [ODS] K线更新: {updated} 只股票, {total} 条记录")
-            return total
-            
-    except ImportError:
-        logger.warning(f"⚠️ {source} 未安装")
-        return 0
-    except Exception as e:
-        logger.error(f"❌ K线更新失败: {e}")
-        return 0
-
-
-def update_ods_instruments(db: QuantDB, source: str = "baostock") -> int:
-    """更新股票列表 (ODS)"""
-    logger.info("📋 [ODS] 检查股票列表更新...")
-    logger.info("   股票列表更新待实现")
-    return 0
-
-
-def update_ods_index_components(db: QuantDB, source: str = "baostock") -> int:
-    """更新指数成分 (ODS)"""
-    logger.info("📊 [ODS] 检查指数成分更新...")
-    logger.info("   指数成分更新待实现")
-    return 0
+    return pd.DataFrame(records)
 
 
 # =============================================================================
-# DWD Updater - 明细数据层更新
+# Update Functions - 更新函数
 # =============================================================================
 
-def update_dwd(db: QuantDB) -> dict:
-    """更新DWD明细数据层"""
-    logger.info("\n" + "=" * 50)
-    logger.info("🔄 [DWD] 增量转换数据...")
-    logger.info("=" * 50)
+def update_ods(db: QuantDB, source: str, args) -> dict:
+    """更新ODS原始数据层"""
+    print("\n" + "=" * 50)
+    print(f"📦 [ODS] 更新原始数据 ({source})")
+    print("=" * 50)
     
     results = {}
     
-    logger.info("📅 转换日历...")
-    results["calendars"] = db.transform_calendars_ods_to_dwd()
-    logger.info(f"   ✅ {results['calendars']} 条")
+    # 确保ODS表存在
+    db.create_ods_tables(source)
     
-    logger.info("📈 转换K线数据...")
-    results["ohlcv"] = db.transform_ohlcv_ods_to_dwd()
-    logger.info(f"   ✅ {results['ohlcv']} 条")
+    # 更新日历
+    print("\n📅 检查日历更新...")
+    df = generate_new_calendar_dates(db, source)
+    if not df.empty:
+        rows = db.import_ods(source, "calendars", df)
+        results["calendars"] = rows
+        print(f"   ✅ +{rows} 条")
+    else:
+        results["calendars"] = 0
+        print("   ✅ 日历已是最新")
+    
+    # 更新K线
+    if args.ohlcv:
+        print("\n📈 更新K线数据...")
+        
+        df = db.get_instruments(active_only=True)
+        symbols = df["symbol"].tolist()[:100]  # 限制数量
+        
+        print(f"   股票数: {len(symbols)}")
+        
+        df = fetch_recent_ohlcv_baostock(symbols, days=args.days)
+        if not df.empty:
+            rows = db.import_ods(source, "daily_ohlcv", df)
+            results["daily_ohlcv"] = rows
+            print(f"   ✅ +{rows} 条")
+        else:
+            results["daily_ohlcv"] = 0
+            print("   ⚠️ 无新数据")
     
     return results
 
 
-# =============================================================================
-# APP Updater - 应用数据层更新
-# =============================================================================
+def run_etl(db: QuantDB, source: str) -> dict:
+    """执行ETL迁移"""
+    print("\n" + "=" * 50)
+    print(f"🔄 [ETL] 数据迁移 ({source})")
+    print("=" * 50)
+    
+    etl = ETLPipeline(db)
+    results = etl.run(source=source)
+    
+    return results
 
-def update_app(db: QuantDB) -> dict:
+
+def update_app(db: QuantDB, args) -> dict:
     """更新APP应用数据层"""
-    logger.info("\n" + "=" * 50)
-    logger.info("🔄 [APP] 更新汇总统计...")
-    logger.info("=" * 50)
+    print("\n" + "=" * 50)
+    print("📊 [APP] 更新汇总统计")
+    print("=" * 50)
     
     results = {}
     
@@ -274,97 +204,54 @@ def update_app(db: QuantDB) -> dict:
     start = f"{today.year}-{today.month:02d}-01"
     end = today.strftime("%Y-%m-%d")
     
-    logger.info(f"📊 更新月度统计: {start} ~ {end}")
-    results["monthly"] = db.aggregate_monthly_stats(start=start, end=end)
-    logger.info(f"   ✅ {results['monthly']} 条")
+    print(f"📅 更新月度统计: {start} ~ {end}")
+    rows = db.aggregate_monthly_stats(start=start, end=end)
+    results["monthly"] = rows
+    print(f"   ✅ {rows} 条")
     
     return results
 
 
-# =============================================================================
-# Validation - 数据校验
-# =============================================================================
-
-def validate_data(db: QuantDB, layer: Optional[str] = None) -> dict:
-    """执行数据校验"""
-    logger.info("\n" + "=" * 50)
-    logger.info(f"🔍 [校验] 数据质量检查{layer if layer else ''}...")
-    logger.info("=" * 50)
+def validate_data(db: QuantDB) -> dict:
+    """校验数据"""
+    print("\n" + "=" * 50)
+    print("🔍 [校验] 数据质量检查")
+    print("=" * 50)
     
-    results = db.validate_all(layer=layer)
+    results = db.validate_all()
     
     passed = sum(1 for r in results if r.passed)
     failed = len(results) - passed
-    warnings = sum(1 for r in results if not r.passed and r.rule.severity == "WARNING")
-    errors = sum(1 for r in results if not r.passed and r.rule.severity == "ERROR")
     
-    logger.info(f"\n校验结果:")
-    logger.info(f"   ✅ 通过: {passed}")
-    logger.info(f"   ⚠️  警告: {warnings}")
-    logger.info(f"   ❌ 错误: {errors}")
+    print(f"\n校验结果: {passed} 通过, {failed} 失败")
     
-    failed_results = [r for r in results if not r.passed]
-    if failed_results:
-        logger.info(f"\n失败详情:")
-        for r in failed_results[:10]:
-            severity_icon = "⚠️" if r.rule.severity == "WARNING" else "❌"
-            logger.info(f"   {severity_icon} {r.rule.name}")
-            logger.info(f"      预期: {r.expected}")
-            logger.info(f"      实际: {r.actual}")
+    for r in results:
+        status = "✅" if r.passed else "❌"
+        print(f"   {status} {r.rule.name}: {r.actual}")
     
-    return {
-        "total": len(results),
-        "passed": passed,
-        "warnings": warnings,
-        "errors": errors,
-        "results": [r.to_dict() for r in results]
-    }
+    return {"total": len(results), "passed": passed, "failed": failed}
 
-
-# =============================================================================
-# Health Check - 健康检查
-# =============================================================================
 
 def health_check(db: QuantDB) -> dict:
-    """数据库健康检查"""
-    logger.info("🏥 执行数据库健康检查...")
-    
-    results = {
-        "status": "healthy",
-        "issues": [],
-        "checks": {}
-    }
+    """健康检查"""
+    print("\n" + "=" * 50)
+    print("🏥 健康检查")
+    print("=" * 50)
     
     info = db.info()
     
-    for layer, tables in info.items():
-        results["checks"][layer] = {}
-        for table, data in tables.items():
-            count = data.get("rows", 0)
-            results["checks"][layer][table] = count
-            
-            if layer == "DWD":
-                if table == "dwd_daily_ohlcv" and count == 0:
-                    results["issues"].append("K线数据为空")
-                elif table == "dwd_calendars" and count == 0:
-                    results["issues"].append("日历数据为空")
+    print(f"\n数据源: {', '.join(info['sources'])}")
     
-    history = db.get_update_history(limit=1)
-    if history.empty:
-        results["issues"].append("从未执行过更新")
-    else:
-        results["checks"]["last_update"] = str(history.iloc[0]["started_at"])
+    for layer, data in info["tables"].items():
+        print(f"\n  [{layer}]")
+        if isinstance(data, dict):
+            for name, info_data in data.items():
+                if isinstance(info_data, dict):
+                    print(f"    {name}: {info_data.get('rows', 0)} 条")
+                elif isinstance(info_data, list):
+                    print(f"    {name}: {len(info_data)} 个表")
     
-    running = db.query("SELECT COUNT(*) FROM meta_update_log WHERE status = 'RUNNING'")
-    if running.iloc[0][0] > 0:
-        results["issues"].append("存在未完成的更新任务")
-    
-    if results["issues"]:
-        results["status"] = "warning"
-        for issue in results["issues"]:
-            logger.warning(f"   ⚠️ {issue}")
-    
-    return results
+    return {"status": "ok"}
 
 
 # =============================================================================
@@ -374,34 +261,31 @@ def health_check(db: QuantDB) -> dict:
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
-        description="增量更新量化数据库 (3层架构)",
+        description="增量更新量化数据库 (3层架构 + ETL分离)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-    # 更新所有数据
+    # 完整更新 (ODS + ETL + APP)
     python scripts/update_data.py --db data/quant.db
 
-    # 仅更新K线并校验
-    python scripts/update_data.py --db data/quant.db --ohlcv --validate
+    # 仅ODS拉取
+    python scripts/update_data.py --db data/quant.db --ods-ohlcv
 
-    # 仅执行校验
+    # 仅ETL迁移
+    python scripts/update_data.py --db data/quant.db --etl
+
+    # 仅校验
     python scripts/update_data.py --db data/quant.db --check
-
-    # 定时任务 (crontab)
-    30 16 * * 1-5 python /path/to/update_data.py --db /data/quant.db --ohlcv
         """
     )
     
     parser.add_argument("--db", type=str, default="data/quant.db", help="数据库路径")
-    parser.add_argument("--ods-only", action="store_true", help="仅更新ODS原始数据")
-    parser.add_argument("--dwd-only", action="store_true", help="仅更新DWD明细数据")
-    parser.add_argument("--calendar", action="store_true", help="更新日历")
-    parser.add_argument("--instruments", action="store_true", help="更新股票列表")
-    parser.add_argument("--indices", action="store_true", help="更新指数成分")
-    parser.add_argument("--ohlcv", action="store_true", help="更新K线数据")
+    parser.add_argument("--source", type=str, default="baostock", help="数据源")
+    parser.add_argument("--ods-calendar", action="store_true", help="更新日历")
+    parser.add_argument("--ods-ohlcv", action="store_true", help="更新K线")
+    parser.add_argument("--etl", action="store_true", help="执行ETL迁移")
     parser.add_argument("--validate", action="store_true", help="执行校验")
     parser.add_argument("--check", action="store_true", help="仅健康检查")
-    parser.add_argument("--source", type=str, choices=["baostock", "akshare"], default="baostock", help="数据源")
     parser.add_argument("--days", type=int, default=5, help="K线更新天数")
     parser.add_argument("--dry-run", action="store_true", help="仅检查")
     parser.add_argument("--verbose", action="store_true", help="详细输出")
@@ -417,9 +301,10 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
     
     print("=" * 60)
-    print("量化数据库日更新 (3层架构)")
+    print("量化数据库日更新 (3层架构 + ETL分离)")
     print("=" * 60)
     print(f"数据库: {args.db}")
+    print(f"数据源: {args.source}")
     print(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
     
@@ -431,13 +316,15 @@ def main():
     
     db = QuantDB(args.db)
     
+    # 仅健康检查
     if args.check:
         health_check(db)
         db.close()
         return
     
+    # 仅干运行
     if args.dry_run:
-        print("🔍 干运行模式，仅检查...")
+        print("🔍 干运行模式...")
         health_check(db)
         db.close()
         return
@@ -445,35 +332,24 @@ def main():
     start_time = datetime.now()
     results = {}
     
-    try:
-        update_ods = args.ods_only or not any([args.dwd_only, args.validate])
-        
-        if update_ods:
-            if args.ods_only or args.calendar:
-                results["ods_calendars"] = update_ods_calendars(db)
-            if args.ods_only or args.instruments:
-                results["ods_instruments"] = update_ods_instruments(db, args.source)
-            if args.ods_only or args.indices:
-                results["ods_index_components"] = update_ods_index_components(db, args.source)
-            if args.ods_only or args.ohlcv:
-                results["ods_ohlcv"] = update_ods_ohlcv(db, args.source, args.days)
-        
-        if args.dwd_only or (not args.ods_only and not any([args.validate, args.check])):
-            results["dwd"] = update_dwd(db)
-        
-        if not args.ods_only and not args.validate:
-            results["app"] = update_app(db)
-        
-        if args.validate:
-            layer = "DWD" if args.dwd_only else None
-            results["validation"] = validate_data(db, layer)
-        
-    except Exception as e:
-        logger.error(f"❌ 更新失败: {e}")
-        raise
-    finally:
-        db.close()
+    # ODS更新
+    update_ods_flag = args.ods_calendar or args.ods_ohlcv
+    if update_ods_flag or (not args.etl and not args.validate):
+        results["ods"] = update_ods(db, args.source, args)
     
+    # ETL迁移
+    if args.etl or (not args.ods_calendar and not args.ods_ohlcv and not args.validate):
+        results["etl"] = run_etl(db, args.source)
+    
+    # APP更新
+    if not args.ods_calendar and not args.ods_ohlcv and not args.validate:
+        results["app"] = update_app(db, args)
+    
+    # 校验
+    if args.validate:
+        results["validation"] = validate_data(db)
+    
+    # 汇总
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
     
@@ -482,27 +358,13 @@ def main():
     print("=" * 60)
     print(f"\n耗时: {duration:.2f} 秒")
     
-    if results:
-        print("\n更新统计:")
-        for key, value in results.items():
-            if isinstance(value, dict):
-                for sub_key, sub_value in value.items():
-                    print(f"   {sub_key}: +{sub_value}")
-            else:
-                print(f"   {key}: +{value}")
-    
+    # 健康检查
     print("\n" + "-" * 60)
-    print("健康检查:")
-    db = QuantDB(args.db)
-    health = health_check(db)
-    db.close()
-    
-    if health["status"] == "healthy":
-        print("   ✅ 数据库状态正常")
-    else:
-        print("   ⚠️ 数据库存在一些问题")
+    health_check(db)
     
     print("=" * 60)
+    
+    db.close()
 
 
 if __name__ == "__main__":
