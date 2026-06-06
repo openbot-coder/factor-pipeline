@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""数据初始化脚本 - 初始化量化数据库 (4层架构)
+"""数据初始化脚本 - 初始化量化数据库 (3层架构)
 
 分层设计:
 - ODS (原始数据层): 从数据源拉取的原始数据
 - DWD (明细数据层): 清洗、标准化后的数据
-- APP (应用数据层): 聚合统计、预计算的数据
+- APP (应用数据层): 聚合统计、因子数据
 - Factors (因子层): 因子数据
 
 Usage:
@@ -443,7 +443,7 @@ def validate_data(db: QuantDB) -> dict:
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
-        description="初始化量化数据库 (4层架构)",
+        description="初始化量化数据库 (3层架构)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     
@@ -471,7 +471,7 @@ def main():
     args = parse_args()
     
     print("=" * 60)
-    print("量化数据库初始化 (4层架构)")
+    print("量化数据库初始化 (3层架构)")
     print("=" * 60)
     print(f"数据库: {args.db}")
     print(f"模式: {args.mode}")

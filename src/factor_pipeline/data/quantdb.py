@@ -1,20 +1,18 @@
-"""Quantitative Database - 量化数据库核心模块 (简化分层设计)
+"""Quantitative Database - 量化数据库核心模块 (3层架构)
 
 采用数仓分层架构:
 - ODS (Operational Data Store): 原始数据层
 - DWD (Data Warehouse Detail): 明细数据层
-- APP (Application Data Service): 应用数据层 (DWS + ADS 合并)
-- Factors: 因子数据层
+- APP (Application Data Service): 应用数据层 (包含因子)
 
 Philosophy: Keep it simple, make it work, make it fast.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from enum import Enum
 from pathlib import Path
@@ -186,7 +184,7 @@ CREATE TABLE IF NOT EXISTS dwd_daily_ohlcv (
 
 
 # =============================================================================
-# APP Layer - 应用数据层 (原 DWS + ADS)
+# APP Layer - 应用数据层 (包含因子)
 # =============================================================================
 
 SCHEMA_APP = """
@@ -267,16 +265,9 @@ CREATE TABLE IF NOT EXISTS app_limit_up_down (
     reason VARCHAR,
     PRIMARY KEY (date, symbol)
 );
-"""
 
-
-# =============================================================================
-# Factors Layer - 因子数据层
-# =============================================================================
-
-SCHEMA_FACTORS = """
--- 因子定义表
-CREATE TABLE IF NOT EXISTS factors_registry (
+-- APP: 因子定义表
+CREATE TABLE IF NOT EXISTS app_factors_registry (
     id INTEGER PRIMARY KEY,
     name VARCHAR UNIQUE,
     category VARCHAR,
@@ -287,8 +278,8 @@ CREATE TABLE IF NOT EXISTS factors_registry (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 因子值缓存表
-CREATE TABLE IF NOT EXISTS factors_values (
+-- APP: 因子值缓存表
+CREATE TABLE IF NOT EXISTS app_factors_values (
     date DATE,
     symbol VARCHAR,
     factor_name VARCHAR,
@@ -297,8 +288,8 @@ CREATE TABLE IF NOT EXISTS factors_values (
     PRIMARY KEY (date, symbol, factor_name)
 );
 
--- 因子IC分析结果
-CREATE TABLE IF NOT EXISTS factors_ic (
+-- APP: 因子IC分析结果
+CREATE TABLE IF NOT EXISTS app_factors_ic (
     id INTEGER PRIMARY KEY,
     factor_name VARCHAR,
     index_code VARCHAR,
@@ -372,7 +363,7 @@ CREATE TABLE IF NOT EXISTS meta_data_sources (
 
 def get_full_schema() -> str:
     """获取完整数据库Schema"""
-    return "\n".join([SCHEMA_ODS, SCHEMA_DWD, SCHEMA_APP, SCHEMA_FACTORS, SCHEMA_META])
+    return "\n".join([SCHEMA_ODS, SCHEMA_DWD, SCHEMA_APP, SCHEMA_META])
 
 
 # =============================================================================
@@ -519,13 +510,12 @@ class ValidationResult:
 
 
 class QuantDB:
-    """量化数据库管理器 (4层架构)
+    """量化数据库管理器 (3层架构)
     
     提供分层数据管理:
     - ODS: 原始数据层
     - DWD: 明细数据层
-    - APP: 应用数据层 (原 DWS + ADS)
-    - Factors: 因子数据层
+    - APP: 应用数据层 (包含因子)
     
     Example:
         db = QuantDB("data/quant.db")
@@ -537,8 +527,8 @@ class QuantDB:
         # 清洗转换到DWD
         db.transform_ods_to_dwd()
         
-        # 计算因子
-        db.calculate_factor("RSI", "000001.SZ", "2024-01-01", "2024-12-31")
+        # 查询数据
+        df = db.get_ohlcv(symbols=["000001.SZ"], start="2024-01-01")
         
         # 校验数据
         results = db.validate_all()
@@ -589,7 +579,7 @@ class QuantDB:
         conn = self.connect()
         conn.execute(get_full_schema())
         conn.commit()
-        print(f"✅ 数据库Schema初始化完成 (4层架构): {self.db_path}")
+        print(f"✅ 数据库Schema初始化完成 (3层架构): {self.db_path}")
     
     def execute(self, sql: str, params: Optional[dict] = None) -> duckdb.DuckDBPyConnection:
         """执行SQL"""
@@ -621,8 +611,7 @@ class QuantDB:
         for _, row in df.iterrows():
             try:
                 conn.execute(
-                    """INSERT OR REPLACE INTO ods_calendars 
-                       VALUES (?, ?, ?, ?, ?)""",
+                    """INSERT OR REPLACE INTO ods_calendars VALUES (?, ?, ?, ?, ?)""",
                     [row["date"], row["exchange"], row["is_trading_day"], source, row.get("fetched_at", datetime.now())]
                 )
             except Exception:
@@ -639,8 +628,7 @@ class QuantDB:
         for _, row in df.iterrows():
             try:
                 conn.execute(
-                    """INSERT OR REPLACE INTO ods_instruments 
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    """INSERT OR REPLACE INTO ods_instruments VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     [row["symbol"], row["name"], row.get("list_date"), 
                      row.get("delist_date"), row["market"], source, row.get("fetched_at", datetime.now())]
                 )
@@ -658,8 +646,7 @@ class QuantDB:
         for _, row in df.iterrows():
             try:
                 conn.execute(
-                    """INSERT OR REPLACE INTO ods_index_components 
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    """INSERT OR REPLACE INTO ods_index_components VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     [row["index_code"], row.get("index_name"), row["symbol"],
                      row.get("in_date"), row.get("out_date"), row.get("weight", 0),
                      source, row.get("fetched_at", datetime.now())]
@@ -678,7 +665,6 @@ class QuantDB:
         
         conn = self.connect()
         
-        # 批量插入
         records = []
         for _, row in df.iterrows():
             records.append([
@@ -690,8 +676,7 @@ class QuantDB:
         
         if records:
             conn.executemany(
-                """INSERT OR REPLACE INTO ods_daily_ohlcv 
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT OR REPLACE INTO ods_daily_ohlcv VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 records
             )
             conn.commit()
@@ -704,7 +689,6 @@ class QuantDB:
     
     def transform_calendars_ods_to_dwd(self) -> int:
         """将ODS日历转换到DWD"""
-        # 获取最新数据源
         source = self.query("SELECT source FROM ods_calendars ORDER BY fetched_at DESC LIMIT 1")
         if source.empty:
             return 0
@@ -779,7 +763,6 @@ class QuantDB:
     
     def transform_index_components_ods_to_dwd(self) -> int:
         """将ODS指数成分转换到DWD"""
-        # 先更新当前标记
         self.execute("UPDATE dwd_index_components SET is_current = FALSE WHERE is_current = TRUE")
         
         source = self.query("SELECT source FROM ods_index_components ORDER BY fetched_at DESC LIMIT 1")
@@ -1097,8 +1080,11 @@ class QuantDB:
         layers = {
             "ODS": ["ods_calendars", "ods_instruments", "ods_index_components", "ods_daily_ohlcv"],
             "DWD": ["dwd_calendars", "dwd_instruments", "dwd_index_components", "dwd_daily_ohlcv"],
-            "APP": ["app_monthly_stats", "app_yearly_stats", "app_index_daily", "app_index_members", "app_limit_up_down"],
-            "Factors": ["factors_registry", "factors_values", "factors_ic"],
+            "APP": [
+                "app_monthly_stats", "app_yearly_stats", "app_index_daily", 
+                "app_index_members", "app_limit_up_down",
+                "app_factors_registry", "app_factors_values", "app_factors_ic"
+            ],
         }
         
         info = {"db_path": self.db_path, "tables": {}}

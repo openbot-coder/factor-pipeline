@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""日更新脚本 - 增量更新量化数据库 (4层架构)
+"""日更新脚本 - 增量更新量化数据库 (3层架构)
 
 分层更新策略:
 - ODS: 拉取最新原始数据
+- DWD: 增量转换清洗数据
+- APP: 更新汇总统计和因子
 - DWD: 增量转换清洗数据
 - APP: 更新汇总统计
 - 校验: 数据质量检查
@@ -372,7 +374,7 @@ def health_check(db: QuantDB) -> dict:
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
-        description="增量更新量化数据库 (4层架构)",
+        description="增量更新量化数据库 (3层架构)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -415,7 +417,7 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
     
     print("=" * 60)
-    print("量化数据库日更新 (4层架构)")
+    print("量化数据库日更新 (3层架构)")
     print("=" * 60)
     print(f"数据库: {args.db}")
     print(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
