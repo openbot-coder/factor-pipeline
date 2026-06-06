@@ -3,8 +3,9 @@
 This module provides:
 - Database schema management (OHLCV, instruments, calendars, factor_cache)
 - CSV import/export functionality
+- Data loading from various sources (DuckDB, Parquet, CSV)
+- Data preprocessing (alignment, NaN handling, normalization)
 - Query utilities
-- Connection pooling
 
 Usage:
     from data.storage import DuckDBStorage
@@ -15,8 +16,12 @@ Usage:
     # Import CSV
     db.import_csv("daily.csv", table="daily_ohlcv")
 
-    # Query
-    df = db.query("SELECT * FROM daily_ohlcv WHERE date >= '2024-01-01'")
+    # Load as MultiIndex dict (for factor computation)
+    data = db.load(symbols=["000001"], start="2024-01-01", end="2024-12-31")
+
+    # Preprocess
+    data = db.preprocess.align(data)
+    data = db.preprocess.winsorize(data)
 
     # Export
     db.export_csv("SELECT * FROM daily_ohlcv", "output.csv")
@@ -29,6 +34,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 import duckdb
+import numpy as np
 import pandas as pd
 
 
@@ -88,6 +94,66 @@ INDEXES = [
 
 
 # =============================================================================
+# DataPreprocessor Class (merged from data/preprocessor.py)
+# =============================================================================
+
+class DataPreprocessor:
+    """Align, clean, and prepare data for factor computation."""
+
+    def __init__(self, data: dict[str, pd.DataFrame]):
+        self._raw = data
+
+    def align(self) -> dict[str, pd.DataFrame]:
+        """Ensure all DataFrames share the same MultiIndex (date, stock)."""
+        common_idx = None
+        for name, df in self._raw.items():
+            if common_idx is None:
+                common_idx = df.index
+            else:
+                common_idx = common_idx.intersection(df.index)
+        aligned = {}
+        for name, df in self._raw.items():
+            aligned[name] = df.loc[common_idx].sort_index()
+        return aligned
+
+    def dropna(self, how: str = "any", pct: float = 0.5) -> dict[str, pd.DataFrame]:
+        """Drop stocks with too many NaN values."""
+        aligned = self.align()
+        cols_to_check = ["close", "volume"]
+        valid_stocks = set()
+        for col in cols_to_check:
+            if col not in aligned:
+                continue
+            df = aligned[col]
+            notna_pct = 1 - df.groupby(level=1).apply(lambda x: x.isna().mean())
+            valid = notna_pct[notna_pct >= pct].index
+            valid_stocks = valid_stocks.intersection(valid) if valid_stocks else set(valid)
+        return {k: v[v.index.get_level_values(1).isin(valid_stocks)] for k, v in aligned.items()}
+
+    def winsorize(self, data: dict[str, pd.DataFrame], limits: float = 0.01) -> dict[str, pd.DataFrame]:
+        """Winsorize extreme values per cross-section."""
+        result = {}
+        for name, df in data.items():
+            def _clip(x):
+                lo, hi = x.quantile(limits), x.quantile(1 - limits)
+                return x.clip(lo, hi)
+            result[name] = df.groupby(level=0).transform(_clip) if not df.empty else df
+        return result
+
+    def neutralise(self, data: pd.DataFrame, groupby: pd.Series = None) -> pd.DataFrame:
+        """Cross-sectional neutralisation (e.g. market/sector)."""
+        if groupby is None:
+            return data - data.groupby(level=0).mean()
+        return data
+
+    def standardise(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Z-score standardisation per date."""
+        mu = data.groupby(level=0).mean()
+        sd = data.groupby(level=0).std()
+        return (data - mu) / sd
+
+
+# =============================================================================
 # DuckDBStorage Class
 # =============================================================================
 
@@ -95,6 +161,7 @@ class DuckDBStorage:
     """DuckDB storage manager for financial data.
 
     Provides a Qlib-compatible interface with DuckDB backend.
+    Includes data loading and preprocessing capabilities.
     """
 
     def __init__(
@@ -114,6 +181,7 @@ class DuckDBStorage:
         self.read_only = read_only
         self.config = config or {}
         self._conn: Optional[duckdb.DuckDBPyConnection] = None
+        self.preprocess = DataPreprocessor({})  # Placeholder, updated on load
 
         # Auto-create if file doesn't exist
         if db_path != ":memory:" and not os.path.exists(db_path):
@@ -481,6 +549,136 @@ class DuckDBStorage:
         return (str(row[0]), str(row[1])) if row else (None, None)
 
     # -------------------------------------------------------------------------
+    # Data Loading (merged from data/loader.py)
+    # -------------------------------------------------------------------------
+
+    def load(
+        self,
+        symbols: list[str] = None,
+        start: str = None,
+        end: str = None,
+        source: str = "duckdb",
+        path: str = None,
+    ) -> dict[str, pd.DataFrame]:
+        """Load OHLCV data as MultiIndex dict for factor computation.
+
+        Args:
+            symbols: List of symbols to load.
+            start: Start date (YYYY-MM-DD).
+            end: End date (YYYY-MM-DD).
+            source: Data source ('duckdb', 'parquet', 'csv').
+            path: Path to data directory (for parquet/csv sources).
+
+        Returns:
+            Dict with keys: open, high, low, close, volume, amount
+            Each value is a DataFrame with MultiIndex (date, symbol).
+
+        Example:
+            data = db.load(symbols=["000001", "000002"], start="2024-01-01")
+            # Returns: {"open": DataFrame, "high": DataFrame, ...}
+        """
+        if source == "duckdb":
+            return self._load_duckdb(symbols, start, end)
+        elif source == "parquet":
+            return self._load_parquet(symbols, start, end, path)
+        elif source == "csv":
+            return self._load_csv(symbols, start, end, path)
+        else:
+            raise ValueError(f"Unknown source: {source}")
+
+    def _load_duckdb(self, symbols: list[str], start: str, end: str) -> dict[str, pd.DataFrame]:
+        """Load data from DuckDB."""
+        db_path = self.db_path
+        if db_path == ":memory:":
+            raise ValueError("Cannot load from in-memory database. Use a file-based database.")
+
+        con = duckdb.connect(str(db_path))
+
+        where_parts = []
+        if symbols:
+            sym_list = ",".join(f"'{s}'" for s in symbols)
+            where_parts.append(f"symbol IN ({sym_list})")
+        if start:
+            where_parts.append(f"date >= '{start}'")
+        if end:
+            where_parts.append(f"date <= '{end}'")
+
+        where_clause = " AND ".join(where_parts) if where_parts else "1=1"
+        query = f"""
+            SELECT date, symbol, open, high, low, close, volume, amount
+            FROM daily_ohlcv
+            WHERE {where_clause}
+            ORDER BY date, symbol
+        """
+        df = con.execute(query).fetchdf()
+        con.close()
+        return self._to_multiindex(df)
+
+    def _load_parquet(
+        self,
+        symbols: list[str],
+        start: str,
+        end: str,
+        path: str,
+    ) -> dict[str, pd.DataFrame]:
+        """Load data from Parquet files."""
+        import glob
+
+        if path is None:
+            raise ValueError("path is required for parquet source")
+
+        files = glob.glob(str(Path(path) / "*.parquet"))
+        if not files:
+            raise FileNotFoundError(f"No parquet files in {path}")
+
+        dfs = []
+        for f in files:
+            df = pd.read_parquet(f)
+            dfs.append(df)
+        df = pd.concat(dfs, ignore_index=True)
+        return self._to_multiindex(df)
+
+    def _load_csv(
+        self,
+        symbols: list[str],
+        start: str,
+        end: str,
+        path: str,
+    ) -> dict[str, pd.DataFrame]:
+        """Load data from CSV files."""
+        import glob
+
+        if path is None:
+            raise ValueError("path is required for csv source")
+
+        files = glob.glob(str(Path(path) / "*.csv"))
+        if not files:
+            raise FileNotFoundError(f"No CSV files in {path}")
+
+        dfs = []
+        for f in files:
+            df = pd.read_csv(f, parse_dates=["date"])
+            dfs.append(df)
+        df = pd.concat(dfs, ignore_index=True)
+        return self._to_multiindex(df)
+
+    def _to_multiindex(self, df: pd.DataFrame) -> dict[str, pd.DataFrame]:
+        """Convert flat DataFrame to MultiIndex dict for factor computation."""
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.set_index(["date", "symbol"]).sort_index()
+
+        # Update preprocessor with loaded data
+        self.preprocess = DataPreprocessor({col: df[[col]] for col in df.columns})
+
+        result = {}
+        for col in ["open", "high", "low", "close", "volume"]:
+            if col in df.columns:
+                result[col] = df[col].to_frame()
+        if "amount" in df.columns:
+            result["amount"] = df["amount"].to_frame()
+        return result
+
+    # -------------------------------------------------------------------------
     # Database Info
     # -------------------------------------------------------------------------
 
@@ -537,3 +735,51 @@ class DuckDBStorage:
     def copy_table(self, source: str, target: str) -> None:
         """Copy a table."""
         self.execute(f"CREATE TABLE {target} AS SELECT * FROM {source}")
+
+    def validate(self) -> dict[str, Any]:
+        """Validate database schema and data integrity.
+
+        Returns:
+            Dict with validation results.
+        """
+        results = {
+            "valid": True,
+            "errors": [],
+            "warnings": [],
+        }
+
+        # Check tables exist
+        tables = self.list_tables()
+        required_tables = ["daily_ohlcv", "instruments", "calendars"]
+        for table in required_tables:
+            if table not in tables:
+                results["valid"] = False
+                results["errors"].append(f"Missing required table: {table}")
+
+        # Check daily_ohlcv structure
+        if "daily_ohlcv" in tables:
+            schema = self.show_schema()
+            ohlcv_cols = [col["column_name"] for col in schema if col["table_name"] == "daily_ohlcv"]
+            required_cols = ["date", "symbol", "open", "high", "low", "close", "volume"]
+            for col in required_cols:
+                if col not in ohlcv_cols:
+                    results["valid"] = False
+                    results["errors"].append(f"Missing required column in daily_ohlcv: {col}")
+
+        # Check for null primary keys
+        if "daily_ohlcv" in tables:
+            null_count = self.fetchone(
+                "SELECT COUNT(*) FROM daily_ohlcv WHERE date IS NULL OR symbol IS NULL"
+            )[0]
+            if null_count > 0:
+                results["warnings"].append(f"Found {null_count} rows with NULL date or symbol")
+
+        # Check for duplicate (date, symbol) pairs
+        if "daily_ohlcv" in tables:
+            dup_count = self.fetchone(
+                "SELECT COUNT(*) FROM (SELECT date, symbol, COUNT(*) as cnt FROM daily_ohlcv GROUP BY date, symbol HAVING cnt > 1)"
+            )[0]
+            if dup_count > 0:
+                results["warnings"].append(f"Found {dup_count} duplicate (date, symbol) pairs")
+
+        return results
