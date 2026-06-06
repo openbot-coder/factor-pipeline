@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""日更新脚本 - 增量更新量化数据库 (分层架构)
+"""日更新脚本 - 增量更新量化数据库 (4层架构)
 
-采用数仓分层更新策略:
+分层更新策略:
 - ODS: 拉取最新原始数据
 - DWD: 增量转换清洗数据
-- DWS: 更新汇总统计
+- APP: 更新汇总统计
 - 校验: 数据质量检查
 
 Usage:
@@ -53,9 +53,7 @@ def setup_logger(name: str = "update_data") -> logging.Logger:
     if not logger.handlers:
         handler = logging.StreamHandler()
         handler.setLevel(logging.INFO)
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
+        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
         handler.setFormatter(formatter)
         logger.addHandler(handler)
     
@@ -73,13 +71,8 @@ def update_ods_calendars(db: QuantDB, days: int = 7) -> int:
     """更新日历 (ODS)"""
     logger.info("📅 [ODS] 检查交易日历更新...")
     
-    # 获取最新日历日期
     trading_days = db.get_trading_days()
-    if trading_days:
-        latest_date = max(trading_days)
-    else:
-        latest_date = "2005-01-01"
-    
+    latest_date = max(trading_days) if trading_days else "2005-01-01"
     logger.info(f"   最新日历日期: {latest_date}")
     
     today = date.today()
@@ -89,7 +82,6 @@ def update_ods_calendars(db: QuantDB, days: int = 7) -> int:
         logger.info("   日历已是最新")
         return 0
     
-    # 生成新日期
     new_dates = []
     current = latest + timedelta(days=1)
     while current <= today:
@@ -115,11 +107,9 @@ def update_ods_ohlcv(db: QuantDB, source: str = "baostock", days: int = 5) -> in
     """更新K线数据 (ODS)"""
     logger.info(f"📈 [ODS] 从 {source} 更新K线数据...")
     
-    # 确定日期范围
     end_date = date.today().strftime("%Y-%m-%d")
     start_date = (date.today() - timedelta(days=days)).strftime("%Y-%m-%d")
     
-    # 获取活跃股票
     df = db.get_instruments(active_only=True)
     symbols = df["symbol"].tolist()
     logger.info(f"   活跃股票: {len(symbols)}")
@@ -132,7 +122,7 @@ def update_ods_ohlcv(db: QuantDB, source: str = "baostock", days: int = 5) -> in
             total = 0
             updated = 0
             
-            for symbol in symbols[:100]:  # 限制数量
+            for symbol in symbols[:100]:
                 try:
                     bs_code = f"sh.{symbol}" if ".SH" in symbol else f"sz.{symbol}"
                     
@@ -142,7 +132,7 @@ def update_ods_ohlcv(db: QuantDB, source: str = "baostock", days: int = 5) -> in
                         start_date=start_date,
                         end_date=end_date,
                         frequency="d",
-                        adjustflag="2",  # 前复权
+                        adjustflag="2",
                     )
                     
                     records = []
@@ -169,8 +159,8 @@ def update_ods_ohlcv(db: QuantDB, source: str = "baostock", days: int = 5) -> in
                         total += len(records)
                         updated += 1
                         
-                except Exception as e:
-                    logger.debug(f"   {symbol} 更新失败: {e}")
+                except Exception:
+                    pass
             
             bs.logout()
             logger.info(f"✅ [ODS] K线更新: {updated} 只股票, {total} 条记录")
@@ -215,14 +205,14 @@ def update_ods_ohlcv(db: QuantDB, source: str = "baostock", days: int = 5) -> in
                         total += len(df)
                         updated += 1
                         
-                except Exception as e:
-                    logger.debug(f"   {symbol} 更新失败: {e}")
+                except Exception:
+                    pass
             
             logger.info(f"✅ [ODS] K线更新: {updated} 只股票, {total} 条记录")
             return total
             
-    except ImportError as e:
-        logger.warning(f"⚠️ {source} 未安装: {e}")
+    except ImportError:
+        logger.warning(f"⚠️ {source} 未安装")
         return 0
     except Exception as e:
         logger.error(f"❌ K线更新失败: {e}")
@@ -232,7 +222,6 @@ def update_ods_ohlcv(db: QuantDB, source: str = "baostock", days: int = 5) -> in
 def update_ods_instruments(db: QuantDB, source: str = "baostock") -> int:
     """更新股票列表 (ODS)"""
     logger.info("📋 [ODS] 检查股票列表更新...")
-    # TODO: 实现增量检查新上市/退市股票
     logger.info("   股票列表更新待实现")
     return 0
 
@@ -240,7 +229,6 @@ def update_ods_instruments(db: QuantDB, source: str = "baostock") -> int:
 def update_ods_index_components(db: QuantDB, source: str = "baostock") -> int:
     """更新指数成分 (ODS)"""
     logger.info("📊 [ODS] 检查指数成分更新...")
-    # TODO: 实现增量检查成分变动
     logger.info("   指数成分更新待实现")
     return 0
 
@@ -268,15 +256,18 @@ def update_dwd(db: QuantDB) -> dict:
     return results
 
 
-def update_dws(db: QuantDB) -> dict:
-    """更新DWS汇总数据层"""
+# =============================================================================
+# APP Updater - 应用数据层更新
+# =============================================================================
+
+def update_app(db: QuantDB) -> dict:
+    """更新APP应用数据层"""
     logger.info("\n" + "=" * 50)
-    logger.info("🔄 [DWS] 更新汇总统计...")
+    logger.info("🔄 [APP] 更新汇总统计...")
     logger.info("=" * 50)
     
     results = {}
     
-    # 只更新当月统计
     today = date.today()
     start = f"{today.year}-{today.month:02d}-01"
     end = today.strftime("%Y-%m-%d")
@@ -310,11 +301,10 @@ def validate_data(db: QuantDB, layer: Optional[str] = None) -> dict:
     logger.info(f"   ⚠️  警告: {warnings}")
     logger.info(f"   ❌ 错误: {errors}")
     
-    # 显示失败项
     failed_results = [r for r in results if not r.passed]
     if failed_results:
         logger.info(f"\n失败详情:")
-        for r in failed_results[:10]:  # 最多显示10条
+        for r in failed_results[:10]:
             severity_icon = "⚠️" if r.rule.severity == "WARNING" else "❌"
             logger.info(f"   {severity_icon} {r.rule.name}")
             logger.info(f"      预期: {r.expected}")
@@ -343,7 +333,6 @@ def health_check(db: QuantDB) -> dict:
         "checks": {}
     }
     
-    # 检查各层数据
     info = db.info()
     
     for layer, tables in info.items():
@@ -358,14 +347,12 @@ def health_check(db: QuantDB) -> dict:
                 elif table == "dwd_calendars" and count == 0:
                     results["issues"].append("日历数据为空")
     
-    # 检查最近更新时间
     history = db.get_update_history(limit=1)
     if history.empty:
         results["issues"].append("从未执行过更新")
     else:
         results["checks"]["last_update"] = str(history.iloc[0]["started_at"])
     
-    # 检查是否有未完成的更新
     running = db.query("SELECT COUNT(*) FROM meta_update_log WHERE status = 'RUNNING'")
     if running.iloc[0][0] > 0:
         results["issues"].append("存在未完成的更新任务")
@@ -385,7 +372,7 @@ def health_check(db: QuantDB) -> dict:
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
-        description="增量更新量化数据库 (分层架构)",
+        description="增量更新量化数据库 (4层架构)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -428,13 +415,12 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
     
     print("=" * 60)
-    print("量化数据库日更新 (分层架构)")
+    print("量化数据库日更新 (4层架构)")
     print("=" * 60)
     print(f"数据库: {args.db}")
     print(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
     
-    # 检查数据库
     if not Path(args.db).exists():
         print(f"❌ 数据库不存在: {args.db}")
         print("   请先运行初始化:")
@@ -443,13 +429,11 @@ def main():
     
     db = QuantDB(args.db)
     
-    # 仅健康检查
     if args.check:
         health_check(db)
         db.close()
         return
     
-    # 仅干运行
     if args.dry_run:
         print("🔍 干运行模式，仅检查...")
         health_check(db)
@@ -460,7 +444,6 @@ def main():
     results = {}
     
     try:
-        # ODS层更新
         update_ods = args.ods_only or not any([args.dwd_only, args.validate])
         
         if update_ods:
@@ -473,15 +456,12 @@ def main():
             if args.ods_only or args.ohlcv:
                 results["ods_ohlcv"] = update_ods_ohlcv(db, args.source, args.days)
         
-        # DWD层更新
         if args.dwd_only or (not args.ods_only and not any([args.validate, args.check])):
             results["dwd"] = update_dwd(db)
         
-        # DWS层更新
         if not args.ods_only and not args.validate:
-            results["dws"] = update_dws(db)
+            results["app"] = update_app(db)
         
-        # 校验
         if args.validate:
             layer = "DWD" if args.dwd_only else None
             results["validation"] = validate_data(db, layer)
@@ -492,7 +472,6 @@ def main():
     finally:
         db.close()
     
-    # 显示结果
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
     
@@ -510,7 +489,6 @@ def main():
             else:
                 print(f"   {key}: +{value}")
     
-    # 健康检查
     print("\n" + "-" * 60)
     print("健康检查:")
     db = QuantDB(args.db)

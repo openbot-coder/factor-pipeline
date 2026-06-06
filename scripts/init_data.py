@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""数据初始化脚本 - 初始化量化数据库 (分层架构)
+"""数据初始化脚本 - 初始化量化数据库 (4层架构)
 
-采用数仓分层设计:
-- ODS (Operational Data Store): 原始数据层
-- DWD (Data Warehouse Detail): 明细数据层
-- DWS (Data Warehouse Summary): 汇总数据层
-- ADS (Application Data Service): 应用数据层
-- Factors: 因子数据层
+分层设计:
+- ODS (原始数据层): 从数据源拉取的原始数据
+- DWD (明细数据层): 清洗、标准化后的数据
+- APP (应用数据层): 聚合统计、预计算的数据
+- Factors (因子层): 因子数据
 
 Usage:
-    # 全量初始化 (ODS + DWD + DWS)
+    # 全量初始化 (ODS + DWD + APP)
     python scripts/init_data.py --mode full --db data/quant.db
 
     # 仅拉取原始数据到ODS
@@ -41,7 +40,6 @@ from factor_pipeline.data.quantdb import QuantDB, IndexCode
 # Configuration - 配置
 # =============================================================================
 
-# 指数配置
 INDICES = {
     "000016.SH": {"name": "上证50", "category": "宽基"},
     "000300.SH": {"name": "沪深300", "category": "宽基"},
@@ -51,44 +49,9 @@ INDICES = {
     "000903.SH": {"name": "中证100", "category": "宽基"},
 }
 
-# 申万一级行业
-SW_INDUSTRIES = [
-    ("801010", "农林牧渔"),
-    ("801020", "采掘"),
-    ("801030", "化工"),
-    ("801040", "钢铁"),
-    ("801050", "有色金属"),
-    ("801080", "电子"),
-    ("801110", "家用电器"),
-    ("801120", "食品饮料"),
-    ("801130", "纺织服装"),
-    ("801140", "轻工制造"),
-    ("801150", "医药生物"),
-    ("801160", "汽车"),
-    ("801170", "公用事业"),
-    ("801180", "房地产"),
-    ("801200", "商业贸易"),
-    ("801210", "餐饮旅游"),
-    ("801230", "建筑材料"),
-    ("801710", "建筑装饰"),
-    ("801720", "电气设备"),
-    ("801730", "国防军工"),
-    ("801740", "计算机"),
-    ("801750", "电子"),
-    ("801760", "传媒"),
-    ("801770", "通信"),
-    ("801780", "非银金融"),
-    ("801790", "银行"),
-    ("801880", "汽车"),
-    ("801950", "煤炭"),
-    ("801960", "石油石化"),
-    ("801970", "环保"),
-    ("801980", "美容护理"),
-]
-
 
 # =============================================================================
-# ODS Fetcher - 原始数据拉取
+# Data Fetchers - 数据拉取
 # =============================================================================
 
 def generate_trading_calendar(start_year: int = 2005, end_year: int = None) -> pd.DataFrame:
@@ -96,9 +59,7 @@ def generate_trading_calendar(start_year: int = 2005, end_year: int = None) -> p
     if end_year is None:
         end_year = date.today().year
     
-    # 法定节假日
     holidays = set()
-    
     for year in range(start_year, end_year + 1):
         holidays.add(f"{year}-01-01")
         holidays.add(f"{year}-01-02")
@@ -159,7 +120,6 @@ def fetch_instruments_baostock() -> pd.DataFrame:
         
         bs.logout()
         return pd.DataFrame(records)
-    
     except ImportError:
         return pd.DataFrame()
 
@@ -185,7 +145,6 @@ def fetch_instruments_akshare() -> pd.DataFrame:
             })
         
         return pd.DataFrame(records)
-    
     except ImportError:
         return pd.DataFrame()
 
@@ -219,7 +178,6 @@ def fetch_index_components_baostock(index_code: str) -> pd.DataFrame:
         
         bs.logout()
         return pd.DataFrame(records)
-    
     except ImportError:
         return pd.DataFrame()
 
@@ -228,7 +186,7 @@ def fetch_ohlcv_baostock(
     symbols: list[str],
     start: str,
     end: str,
-    adjust: str = "2",  # 2=前复权
+    adjust: str = "2",  # 前复权
 ) -> pd.DataFrame:
     """从baostock获取K线数据"""
     try:
@@ -269,7 +227,6 @@ def fetch_ohlcv_baostock(
         
         bs.logout()
         return pd.DataFrame(all_records)
-    
     except ImportError:
         return pd.DataFrame()
 
@@ -316,7 +273,6 @@ def fetch_ohlcv_akshare(
         
         return df[["date", "symbol", "open", "high", "low", "close", "volume", 
                    "amount", "turnover_rate", "pct_change", "adjust_flag", "source", "fetched_at"]]
-    
     except ImportError:
         return pd.DataFrame()
 
@@ -335,8 +291,7 @@ def init_ods_calendars(db: QuantDB, args) -> int:
     
     rows = db.import_ods_calendars(df, source="generated")
     
-    end_time = datetime.now()
-    print(f"✅ [ODS] 日历导入完成: {rows} 条 ({(end_time - start_time).total_seconds():.2f}s)")
+    print(f"✅ [ODS] 日历导入完成: {rows} 条 ({(datetime.now() - start_time).total_seconds():.2f}s)")
     return rows
 
 
@@ -444,10 +399,10 @@ def init_dwd(db: QuantDB, args) -> dict:
     return results
 
 
-def init_dws(db: QuantDB, args) -> dict:
-    """初始化DWS汇总数据层"""
+def init_app(db: QuantDB, args) -> dict:
+    """初始化APP应用数据层"""
     print("\n" + "=" * 50)
-    print("🔄 [DWS] 聚合汇总数据...")
+    print("🔄 [APP] 聚合汇总数据...")
     print("=" * 50)
     start_time = datetime.now()
     
@@ -457,7 +412,7 @@ def init_dws(db: QuantDB, args) -> dict:
     results["monthly"] = db.aggregate_monthly_stats()
     print(f"   ✅ {results['monthly']} 条")
     
-    print(f"\n✅ [DWS] 汇总完成 ({(datetime.now() - start_time).total_seconds():.2f}s)")
+    print(f"\n✅ [APP] 汇总完成 ({(datetime.now() - start_time).total_seconds():.2f}s)")
     return results
 
 
@@ -488,7 +443,7 @@ def validate_data(db: QuantDB) -> dict:
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
-        description="初始化量化数据库 (分层架构)",
+        description="初始化量化数据库 (4层架构)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     
@@ -496,7 +451,7 @@ def parse_args():
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["full", "ods", "dwd", "dws", "validate", "calendar", "instruments", "indices", "ohlcv"],
+        choices=["full", "ods", "dwd", "app", "validate", "calendar", "instruments", "indices", "ohlcv"],
         default="full",
         help="初始化模式",
     )
@@ -516,17 +471,15 @@ def main():
     args = parse_args()
     
     print("=" * 60)
-    print("量化数据库初始化 (分层架构)")
+    print("量化数据库初始化 (4层架构)")
     print("=" * 60)
     print(f"数据库: {args.db}")
     print(f"模式: {args.mode}")
     print(f"数据源: {args.source}")
     print("=" * 60)
     
-    # 确保目录存在
     Path(args.db).parent.mkdir(parents=True, exist_ok=True)
     
-    # 初始化数据库
     db = QuantDB(args.db)
     
     if args.force:
@@ -544,13 +497,10 @@ def main():
     
     elif args.mode == "calendar":
         results["ods_calendars"] = init_ods_calendars(db, args)
-    
     elif args.mode == "instruments":
         results["ods_instruments"] = init_ods_instruments(db, args)
-    
     elif args.mode == "indices":
         results["ods_index_components"] = init_ods_index_components(db, args)
-    
     elif args.mode == "ohlcv":
         results["ods_ohlcv"] = init_ods_ohlcv(db, args)
     
@@ -558,9 +508,9 @@ def main():
     if args.mode in ["full", "dwd"]:
         results["dwd"] = init_dwd(db, args)
     
-    # DWS层
-    if args.mode in ["full", "dws"]:
-        results["dws"] = init_dws(db, args)
+    # APP层
+    if args.mode in ["full", "app"]:
+        results["app"] = init_app(db, args)
     
     # 校验
     if args.mode == "validate":
@@ -575,7 +525,7 @@ def main():
     
     info = db.info()
     print("\n数据库信息:")
-    for layer, tables in info.items():
+    for layer, tables in info["tables"].items():
         print(f"\n  [{layer}]")
         for table, data in tables.items():
             print(f"    {table}: {data['rows']} 条")

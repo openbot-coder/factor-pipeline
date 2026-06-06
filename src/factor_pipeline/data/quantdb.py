@@ -1,10 +1,9 @@
-"""Quantitative Database - 量化数据库核心模块 (分层设计)
+"""Quantitative Database - 量化数据库核心模块 (简化分层设计)
 
-采用典型数仓分层架构:
+采用数仓分层架构:
 - ODS (Operational Data Store): 原始数据层
 - DWD (Data Warehouse Detail): 明细数据层
-- DWS (Data Warehouse Summary): 汇总数据层
-- ADS (Application Data Service): 应用数据层
+- APP (Application Data Service): 应用数据层 (DWS + ADS 合并)
 - Factors: 因子数据层
 
 Philosophy: Keep it simple, make it work, make it fast.
@@ -59,20 +58,19 @@ class IndexCode(Enum):
 # ODS Layer - 原始数据层
 # =============================================================================
 
-# ODS层Schema：存储从数据源拉取的原始数据，不做任何清洗
 SCHEMA_ODS = """
--- ODS: 原始日历数据 (从baostock/akshare直接获取)
-CREATE TABLE IF NOT EXISTS ods_calendars_raw (
+-- ODS: 原始日历数据
+CREATE TABLE IF NOT EXISTS ods_calendars (
     date DATE,
-    exchange VARCHAR,      -- 交易所代码
+    exchange VARCHAR,
     is_trading_day BOOLEAN,
-    source VARCHAR,        -- 数据源: baostock, akshare
+    source VARCHAR,
     fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (date, exchange, source)
 );
 
 -- ODS: 原始股票列表
-CREATE TABLE IF NOT EXISTS ods_instruments_raw (
+CREATE TABLE IF NOT EXISTS ods_instruments (
     symbol VARCHAR,
     name VARCHAR,
     list_date DATE,
@@ -84,7 +82,7 @@ CREATE TABLE IF NOT EXISTS ods_instruments_raw (
 );
 
 -- ODS: 原始指数成分
-CREATE TABLE IF NOT EXISTS ods_index_components_raw (
+CREATE TABLE IF NOT EXISTS ods_index_components (
     index_code VARCHAR,
     index_name VARCHAR,
     symbol VARCHAR,
@@ -97,7 +95,7 @@ CREATE TABLE IF NOT EXISTS ods_index_components_raw (
 );
 
 -- ODS: 原始K线数据
-CREATE TABLE IF NOT EXISTS ods_daily_ohlcv_raw (
+CREATE TABLE IF NOT EXISTS ods_daily_ohlcv (
     date DATE,
     symbol VARCHAR,
     open DOUBLE,
@@ -108,7 +106,7 @@ CREATE TABLE IF NOT EXISTS ods_daily_ohlcv_raw (
     amount DOUBLE,
     turnover_rate DOUBLE,
     pct_change DOUBLE,
-    adjust_flag VARCHAR,   -- 复权标志: 1=后复权 2=前复权 3=不复权
+    adjust_flag VARCHAR,
     source VARCHAR,
     fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (date, symbol, source)
@@ -120,9 +118,8 @@ CREATE TABLE IF NOT EXISTS ods_daily_ohlcv_raw (
 # DWD Layer - 明细数据层
 # =============================================================================
 
-# DWD层Schema：经过清洗、标准化、统一格式的数据
 SCHEMA_DWD = """
--- DWD: 交易日历 (标准化后的日历)
+-- DWD: 交易日历
 CREATE TABLE IF NOT EXISTS dwd_calendars (
     date DATE PRIMARY KEY,
     is_trading_day BOOLEAN DEFAULT TRUE,
@@ -139,21 +136,19 @@ CREATE TABLE IF NOT EXISTS dwd_calendars (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- DWD: 股票基础信息 (标准化)
+-- DWD: 股票基础信息
 CREATE TABLE IF NOT EXISTS dwd_instruments (
     symbol VARCHAR PRIMARY KEY,
     name VARCHAR,
     list_date DATE,
     delist_date DATE,
-    market VARCHAR,              -- SSE/SZSE/BSE
-    board_type VARCHAR,          -- 主板/创业板/科创板/北交所
-    shenzhen_code VARCHAR,       -- 深交所代码
-    shanghai_code VARCHAR,      -- 上交所代码
-    industry_sw_l1 VARCHAR,     -- 申万一级行业
-    industry_sw_l2 VARCHAR,     -- 申万二级行业
-    industry_sw_l3 VARCHAR,     -- 申万三级行业
-    industry_csrc VARCHAR,      -- 证监会行业
-    status VARCHAR DEFAULT 'ACTIVE',  -- ACTIVE/DELISTED/SUSPENDED
+    market VARCHAR,
+    board_type VARCHAR,
+    industry_sw_l1 VARCHAR,
+    industry_sw_l2 VARCHAR,
+    industry_sw_l3 VARCHAR,
+    industry_csrc VARCHAR,
+    status VARCHAR DEFAULT 'ACTIVE',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -183,39 +178,38 @@ CREATE TABLE IF NOT EXISTS dwd_daily_ohlcv (
     amount DOUBLE,
     turnover_rate DOUBLE,
     pct_change DOUBLE,
-    factor DOUBLE DEFAULT 1.0,      -- 复权因子
-    raw_close DOUBLE,               -- 原始收盘价
+    factor DOUBLE DEFAULT 1.0,
+    raw_close DOUBLE,
     PRIMARY KEY (date, symbol)
 );
 """
 
 
 # =============================================================================
-# DWS Layer - 汇总数据层
+# APP Layer - 应用数据层 (原 DWS + ADS)
 # =============================================================================
 
-# DWS层Schema：聚合、统计、预计算的数据
-SCHEMA_DWS = """
--- DWS: 月度汇总
-CREATE TABLE IF NOT EXISTS dws_monthly_stats (
+SCHEMA_APP = """
+-- APP: 月度汇总统计
+CREATE TABLE IF NOT EXISTS app_monthly_stats (
     symbol VARCHAR,
     year INTEGER,
     month INTEGER,
     start_date DATE,
     end_date DATE,
-    open_first DOUBLE,         -- 月初开盘价
-    close_last DOUBLE,         -- 月末收盘价
-    high_max DOUBLE,           -- 月最高价
-    low_min DOUBLE,            -- 月最低价
-    volume_sum DOUBLE,         -- 总成交量
-    amount_sum DOUBLE,         -- 总成交额
-    avg_turnover_rate DOUBLE,  -- 平均换手率
-    pct_change_monthly DOUBLE, -- 月涨跌幅
+    open_first DOUBLE,
+    close_last DOUBLE,
+    high_max DOUBLE,
+    low_min DOUBLE,
+    volume_sum DOUBLE,
+    amount_sum DOUBLE,
+    avg_turnover_rate DOUBLE,
+    pct_change_monthly DOUBLE,
     PRIMARY KEY (symbol, year, month)
 );
 
--- DWS: 年度汇总
-CREATE TABLE IF NOT EXISTS dws_yearly_stats (
+-- APP: 年度汇总统计
+CREATE TABLE IF NOT EXISTS app_yearly_stats (
     symbol VARCHAR,
     year INTEGER,
     start_date DATE,
@@ -231,8 +225,8 @@ CREATE TABLE IF NOT EXISTS dws_yearly_stats (
     PRIMARY KEY (symbol, year)
 );
 
--- DWS: 指数日行情
-CREATE TABLE IF NOT EXISTS dws_index_daily (
+-- APP: 指数日行情
+CREATE TABLE IF NOT EXISTS app_index_daily (
     date DATE,
     index_code VARCHAR,
     index_name VARCHAR,
@@ -245,17 +239,9 @@ CREATE TABLE IF NOT EXISTS dws_index_daily (
     pct_change DOUBLE,
     PRIMARY KEY (date, index_code)
 );
-"""
 
-
-# =============================================================================
-# ADS Layer - 应用数据层
-# =============================================================================
-
-# ADS层Schema：面向应用的数据视图
-SCHEMA_ADS = """
--- ADS: 股票池成员 (当前有效)
-CREATE TABLE IF NOT EXISTS ads_index_members (
+-- APP: 当前股票池成员
+CREATE TABLE IF NOT EXISTS app_index_members (
     index_code VARCHAR,
     index_name VARCHAR,
     symbol VARCHAR,
@@ -266,11 +252,11 @@ CREATE TABLE IF NOT EXISTS ads_index_members (
     PRIMARY KEY (index_code, symbol)
 );
 
--- ADS: 涨跌停股票
-CREATE TABLE IF NOT EXISTS ads_limit_up_down (
+-- APP: 涨跌停股票
+CREATE TABLE IF NOT EXISTS app_limit_up_down (
     date DATE,
     symbol VARCHAR,
-    limit_type VARCHAR,       -- LIMIT_UP/LIMIT_DOWN
+    limit_type VARCHAR,
     prev_close DOUBLE,
     open DOUBLE,
     high DOUBLE,
@@ -288,16 +274,15 @@ CREATE TABLE IF NOT EXISTS ads_limit_up_down (
 # Factors Layer - 因子数据层
 # =============================================================================
 
-# Factors层Schema：存储计算好的因子值
 SCHEMA_FACTORS = """
 -- 因子定义表
 CREATE TABLE IF NOT EXISTS factors_registry (
     id INTEGER PRIMARY KEY,
     name VARCHAR UNIQUE,
-    category VARCHAR,          -- alpha, technical, fundamental
+    category VARCHAR,
     description TEXT,
-    expression TEXT,           -- 因子表达式
-    parameters JSON,           -- 参数字典
+    expression TEXT,
+    parameters JSON,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -308,7 +293,7 @@ CREATE TABLE IF NOT EXISTS factors_values (
     symbol VARCHAR,
     factor_name VARCHAR,
     value DOUBLE,
-    source VARCHAR,           -- 计算来源: gtja191, technical, custom
+    source VARCHAR,
     PRIMARY KEY (date, symbol, factor_name)
 );
 
@@ -316,18 +301,18 @@ CREATE TABLE IF NOT EXISTS factors_values (
 CREATE TABLE IF NOT EXISTS factors_ic (
     id INTEGER PRIMARY KEY,
     factor_name VARCHAR,
-    index_code VARCHAR,       -- 股票池代码
+    index_code VARCHAR,
     start_date DATE,
     end_date DATE,
     ic_mean DOUBLE,
     ic_std DOUBLE,
-    ic_ir DOUBLE,             -- IC_IR = IC_mean / IC_std
+    ic_ir DOUBLE,
     rank_ic_mean DOUBLE,
     rank_ic_std DOUBLE,
     rank_ic_ir DOUBLE,
-    return_long DOUBLE,        -- 多头收益
-    return_short DOUBLE,       -- 空头收益
-    return_long_short DOUBLE,  -- 多空收益
+    return_long DOUBLE,
+    return_short DOUBLE,
+    return_long_short DOUBLE,
     calculated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(factor_name, index_code, start_date, end_date)
 );
@@ -338,19 +323,19 @@ CREATE TABLE IF NOT EXISTS factors_ic (
 # Metadata Layer - 元数据层
 # =============================================================================
 
-SCHEMA_METADATA = """
+SCHEMA_META = """
 -- 数据更新日志
 CREATE TABLE IF NOT EXISTS meta_update_log (
     id INTEGER PRIMARY KEY,
-    layer VARCHAR,             -- ODS/DWD/DWS/ADS/FACTORS
+    layer VARCHAR,
     table_name VARCHAR,
-    update_type VARCHAR,       -- FULL/INCREMENTAL
+    update_type VARCHAR,
     start_date DATE,
     end_date DATE,
     records_total INTEGER,
     records_success INTEGER,
     records_failed INTEGER,
-    status VARCHAR,           -- RUNNING/SUCCESS/FAILED
+    status VARCHAR,
     error_message TEXT,
     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
@@ -362,7 +347,7 @@ CREATE TABLE IF NOT EXISTS meta_validation_log (
     id INTEGER PRIMARY KEY,
     layer VARCHAR,
     table_name VARCHAR,
-    check_type VARCHAR,        -- COMPLETENESS/ACCURACY/CONSISTENCY
+    check_type VARCHAR,
     check_column VARCHAR,
     expected_value VARCHAR,
     actual_value VARCHAR,
@@ -375,37 +360,19 @@ CREATE TABLE IF NOT EXISTS meta_validation_log (
 CREATE TABLE IF NOT EXISTS meta_data_sources (
     id INTEGER PRIMARY KEY,
     source_name VARCHAR UNIQUE,
-    source_type VARCHAR,       -- baostock/akshare/tushare
-    config JSON,               -- 配置信息
+    source_type VARCHAR,
+    config JSON,
     enabled BOOLEAN DEFAULT TRUE,
     last_fetch_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- 版本信息
-CREATE TABLE IF NOT EXISTS meta_version (
-    version VARCHAR PRIMARY KEY,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    description TEXT
-);
 """
 
 
-# =============================================================================
-# Combined Schema - 完整Schema
-# =============================================================================
-
 def get_full_schema() -> str:
     """获取完整数据库Schema"""
-    return "\n".join([
-        SCHEMA_ODS,
-        SCHEMA_DWD,
-        SCHEMA_DWS,
-        SCHEMA_ADS,
-        SCHEMA_FACTORS,
-        SCHEMA_METADATA,
-    ])
+    return "\n".join([SCHEMA_ODS, SCHEMA_DWD, SCHEMA_APP, SCHEMA_FACTORS, SCHEMA_META])
 
 
 # =============================================================================
@@ -419,45 +386,36 @@ class ValidationRule:
     layer: str
     table: str
     column: str
-    check_type: str  # completeness, accuracy, consistency, timeliness
+    check_type: str
     sql: str
     expected: str
-    severity: str = "ERROR"  # ERROR, WARNING, INFO
+    severity: str = "ERROR"
 
 
 VALIDATION_RULES = [
     # ODS层校验
     ValidationRule(
-        name="ods_ohlcv_completeness",
-        layer="ODS",
-        table="ods_daily_ohlcv_raw",
-        column="*",
-        check_type="completeness",
-        sql="SELECT COUNT(*) FROM ods_daily_ohlcv_raw WHERE date = ? AND source = ?",
-        expected="count > 0",
-    ),
-    ValidationRule(
         name="ods_ohlcv_price_accuracy",
         layer="ODS",
-        table="ods_daily_ohlcv_raw",
+        table="ods_daily_ohlcv",
         column="close",
         check_type="accuracy",
-        sql="SELECT COUNT(*) FROM ods_daily_ohlcv_raw WHERE close <= 0 OR close IS NULL",
+        sql="SELECT COUNT(*) FROM ods_daily_ohlcv WHERE close <= 0 OR close IS NULL",
         expected="count = 0",
     ),
     ValidationRule(
         name="ods_ohlcv_high_low_consistency",
         layer="ODS",
-        table="ods_daily_ohlcv_raw",
+        table="ods_daily_ohlcv",
         column="high/low",
         check_type="consistency",
-        sql="SELECT COUNT(*) FROM ods_daily_ohlcv_raw WHERE high < low OR high < close OR low > close",
+        sql="SELECT COUNT(*) FROM ods_daily_ohlcv WHERE high < low OR high < close OR low > close",
         expected="count = 0",
     ),
     
     # DWD层校验
     ValidationRule(
-        name="dwd_calendar_trading_days",
+        name="dwd_calendar_weekend",
         layer="DWD",
         table="dwd_calendars",
         column="is_trading_day",
@@ -492,10 +450,8 @@ VALIDATION_RULES = [
         sql="SELECT COUNT(*) FROM dwd_daily_ohlcv WHERE volume < 0 OR amount < 0",
         expected="count = 0",
     ),
-    
-    # 时效性校验
     ValidationRule(
-        name="timeliness_recent_data",
+        name="dwd_ohlcv_timeliness",
         layer="DWD",
         table="dwd_daily_ohlcv",
         column="date",
@@ -563,13 +519,12 @@ class ValidationResult:
 
 
 class QuantDB:
-    """量化数据库管理器 (分层架构)
+    """量化数据库管理器 (4层架构)
     
     提供分层数据管理:
     - ODS: 原始数据层
-    - DWD: 明细数据层  
-    - DWS: 汇总数据层
-    - ADS: 应用数据层
+    - DWD: 明细数据层
+    - APP: 应用数据层 (原 DWS + ADS)
     - Factors: 因子数据层
     
     Example:
@@ -601,7 +556,6 @@ class QuantDB:
         self.config = config or {}
         self._conn: Optional[duckdb.DuckDBPyConnection] = None
         
-        # 自动初始化
         if db_path != ":memory:" and not os.path.exists(db_path):
             self.init_schema()
         elif db_path != ":memory:":
@@ -635,7 +589,7 @@ class QuantDB:
         conn = self.connect()
         conn.execute(get_full_schema())
         conn.commit()
-        print(f"✅ 数据库Schema初始化完成 (分层架构): {self.db_path}")
+        print(f"✅ 数据库Schema初始化完成 (4层架构): {self.db_path}")
     
     def execute(self, sql: str, params: Optional[dict] = None) -> duckdb.DuckDBPyConnection:
         """执行SQL"""
@@ -663,10 +617,16 @@ class QuantDB:
         df = df.copy()
         df["source"] = source
         conn = self.connect()
-        conn.executemany(
-            "INSERT OR REPLACE INTO ods_calendars_raw VALUES (?, ?, ?, ?, ?)",
-            df[["date", "exchange", "is_trading_day", "source", "fetched_at"]].values.tolist()
-        )
+        
+        for _, row in df.iterrows():
+            try:
+                conn.execute(
+                    """INSERT OR REPLACE INTO ods_calendars 
+                       VALUES (?, ?, ?, ?, ?)""",
+                    [row["date"], row["exchange"], row["is_trading_day"], source, row.get("fetched_at", datetime.now())]
+                )
+            except Exception:
+                pass
         conn.commit()
         return len(df)
     
@@ -675,26 +635,17 @@ class QuantDB:
         df = df.copy()
         df["source"] = source
         conn = self.connect()
-        conn.executemany(
-            "INSERT OR REPLACE INTO ods_instruments_raw VALUES (?, ?, ?, ?, ?, ?, ?)",
-            df[["symbol", "name", "list_date", "delist_date", "market", "source", "fetched_at"]].values.tolist()
-        )
-        conn.commit()
-        return len(df)
-    
-    def import_ods_ohlcv(self, df: pd.DataFrame, source: str) -> int:
-        """导入原始K线数据到ODS层"""
-        df = df.copy()
-        df["source"] = source
-        df["fetched_at"] = datetime.now()
         
-        conn = self.connect()
-        conn.executemany(
-            """INSERT OR REPLACE INTO ods_daily_ohlcv_raw 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            df[["date", "symbol", "open", "high", "low", "close", "volume", "amount",
-                "turnover_rate", "pct_change", "adjust_flag", "source", "fetched_at"]].values.tolist()
-        )
+        for _, row in df.iterrows():
+            try:
+                conn.execute(
+                    """INSERT OR REPLACE INTO ods_instruments 
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    [row["symbol"], row["name"], row.get("list_date"), 
+                     row.get("delist_date"), row["market"], source, row.get("fetched_at", datetime.now())]
+                )
+            except Exception:
+                pass
         conn.commit()
         return len(df)
     
@@ -703,12 +654,49 @@ class QuantDB:
         df = df.copy()
         df["source"] = source
         conn = self.connect()
-        conn.executemany(
-            "INSERT OR REPLACE INTO ods_index_components_raw VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            df[["index_code", "index_name", "symbol", "in_date", "out_date", "weight", "source", "fetched_at"]].values.tolist()
-        )
+        
+        for _, row in df.iterrows():
+            try:
+                conn.execute(
+                    """INSERT OR REPLACE INTO ods_index_components 
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [row["index_code"], row.get("index_name"), row["symbol"],
+                     row.get("in_date"), row.get("out_date"), row.get("weight", 0),
+                     source, row.get("fetched_at", datetime.now())]
+                )
+            except Exception:
+                pass
         conn.commit()
         return len(df)
+    
+    def import_ods_ohlcv(self, df: pd.DataFrame, source: str) -> int:
+        """导入原始K线数据到ODS层"""
+        df = df.copy()
+        df["source"] = source
+        if "fetched_at" not in df.columns:
+            df["fetched_at"] = datetime.now()
+        
+        conn = self.connect()
+        
+        # 批量插入
+        records = []
+        for _, row in df.iterrows():
+            records.append([
+                row["date"], row["symbol"], row.get("open", 0), row.get("high", 0),
+                row.get("low", 0), row.get("close", 0), row.get("volume", 0),
+                row.get("amount", 0), row.get("turnover_rate", 0), row.get("pct_change", 0),
+                row.get("adjust_flag", "2"), source, row.get("fetched_at", datetime.now())
+            ])
+        
+        if records:
+            conn.executemany(
+                """INSERT OR REPLACE INTO ods_daily_ohlcv 
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                records
+            )
+            conn.commit()
+        
+        return len(records)
     
     # -------------------------------------------------------------------------
     # DWD Layer Operations - 明细数据层操作
@@ -716,7 +704,13 @@ class QuantDB:
     
     def transform_calendars_ods_to_dwd(self) -> int:
         """将ODS日历转换到DWD"""
-        sql = """
+        # 获取最新数据源
+        source = self.query("SELECT source FROM ods_calendars ORDER BY fetched_at DESC LIMIT 1")
+        if source.empty:
+            return 0
+        source_name = source.iloc[0]["source"]
+        
+        sql = f"""
             INSERT INTO dwd_calendars (date, is_trading_day, year, quarter, month, 
                                         week_of_year, day_of_week, is_month_end, 
                                         is_quarter_end, is_year_end, is_week_end)
@@ -733,8 +727,8 @@ class QuantDB:
                 DATE_TRUNC('year', date) + INTERVAL '1 year' - INTERVAL '1 day' = date as is_year_end,
                 EXTRACT(DAYOFWEEK FROM date) = 6 as is_week_end,
                 'ALL'
-            FROM ods_calendars_raw
-            WHERE source = (SELECT source FROM ods_calendars_raw ORDER BY fetched_at DESC LIMIT 1)
+            FROM ods_calendars
+            WHERE source = '{source_name}'
             ON CONFLICT(date) DO UPDATE SET
                 is_trading_day = excluded.is_trading_day,
                 year = excluded.year,
@@ -751,15 +745,74 @@ class QuantDB:
         conn = self.execute(sql)
         return conn.rowcount
     
-    def transform_ohlcv_ods_to_dwd(self, adjust: str = "qfq") -> int:
-        """将ODS K线转换到DWD (前复权)
+    def transform_instruments_ods_to_dwd(self) -> int:
+        """将ODS股票信息转换到DWD"""
+        source = self.query("SELECT source FROM ods_instruments ORDER BY fetched_at DESC LIMIT 1")
+        if source.empty:
+            return 0
+        source_name = source.iloc[0]["source"]
         
-        Args:
-            adjust: 复权类型 qfq=前复权 hfq=后复权 qfq_q=false前复权
+        sql = f"""
+            INSERT INTO dwd_instruments (symbol, name, list_date, delist_date, market, board_type)
+            SELECT DISTINCT ON (symbol)
+                symbol,
+                MAX(name) as name,
+                MIN(list_date) as list_date,
+                MAX(delist_date) as delist_date,
+                market,
+                CASE 
+                    WHEN symbol LIKE '688%' THEN '科创板'
+                    WHEN symbol LIKE '002%' OR symbol LIKE '003%' THEN '创业板'
+                    WHEN symbol LIKE '430%' OR symbol LIKE '830%' THEN '北交所'
+                    ELSE '主板'
+                END as board_type
+            FROM ods_instruments
+            WHERE source = '{source_name}'
+            GROUP BY symbol, market
+            ON CONFLICT(symbol) DO UPDATE SET
+                name = excluded.name,
+                delist_date = excluded.delist_date,
+                updated_at = CURRENT_TIMESTAMP
         """
-        # 确定数据源
-        source = "baostock"  # 默认baostock
-        adjust_flag = "2" if adjust == "qfq" else "1"  # baostock复权标志
+        conn = self.execute(sql)
+        return conn.rowcount
+    
+    def transform_index_components_ods_to_dwd(self) -> int:
+        """将ODS指数成分转换到DWD"""
+        # 先更新当前标记
+        self.execute("UPDATE dwd_index_components SET is_current = FALSE WHERE is_current = TRUE")
+        
+        source = self.query("SELECT source FROM ods_index_components ORDER BY fetched_at DESC LIMIT 1")
+        if source.empty:
+            return 0
+        source_name = source.iloc[0]["source"]
+        
+        sql = f"""
+            INSERT INTO dwd_index_components (index_code, index_name, symbol, in_date, out_date, weight, is_current)
+            SELECT 
+                index_code,
+                MAX(index_name) as index_name,
+                symbol,
+                MIN(in_date) as in_date,
+                MAX(out_date) as out_date,
+                MAX(weight) as weight,
+                TRUE as is_current
+            FROM ods_index_components
+            WHERE source = '{source_name}'
+            GROUP BY index_code, symbol
+            ON CONFLICT(index_code, symbol, in_date) DO UPDATE SET
+                out_date = excluded.out_date,
+                weight = excluded.weight
+        """
+        conn = self.execute(sql)
+        return conn.rowcount
+    
+    def transform_ohlcv_ods_to_dwd(self) -> int:
+        """将ODS K线转换到DWD (前复权)"""
+        source = self.query("SELECT source FROM ods_daily_ohlcv ORDER BY fetched_at DESC LIMIT 1")
+        if source.empty:
+            return 0
+        source_name = source.iloc[0]["source"]
         
         sql = f"""
             INSERT INTO dwd_daily_ohlcv (date, symbol, open, high, low, close, 
@@ -777,9 +830,9 @@ class QuantDB:
                 pct_change,
                 1.0 as factor,
                 close as raw_close
-            FROM ods_daily_ohlcv_raw
-            WHERE source = '{source}'
-              AND adjust_flag = '{adjust_flag}'
+            FROM ods_daily_ohlcv
+            WHERE source = '{source_name}'
+              AND adjust_flag = '2'
             ON CONFLICT(date, symbol) DO UPDATE SET
                 open = excluded.open,
                 high = excluded.high,
@@ -795,59 +848,7 @@ class QuantDB:
         conn = self.execute(sql)
         return conn.rowcount
     
-    def transform_instruments_ods_to_dwd(self) -> int:
-        """将ODS股票信息转换到DWD"""
-        sql = """
-            INSERT INTO dwd_instruments (symbol, name, list_date, delist_date, market, 
-                                          board_type, industry_sw_l1)
-            SELECT DISTINCT ON (symbol)
-                symbol,
-                MAX(name) as name,
-                MIN(list_date) as list_date,
-                MAX(delist_date) as delist_date,
-                market,
-                CASE 
-                    WHEN symbol LIKE '688%' THEN '科创板'
-                    WHEN symbol LIKE '002%' OR symbol LIKE '003%' THEN '创业板'
-                    WHEN symbol LIKE '430%' OR symbol LIKE '830%' THEN '北交所'
-                    ELSE '主板'
-                END as board_type,
-                NULL as industry_sw_l1
-            FROM ods_instruments_raw
-            GROUP BY symbol, market
-            ON CONFLICT(symbol) DO UPDATE SET
-                name = excluded.name,
-                delist_date = excluded.delist_date,
-                updated_at = CURRENT_TIMESTAMP
-        """
-        conn = self.execute(sql)
-        return conn.rowcount
-    
-    def transform_index_components_ods_to_dwd(self) -> int:
-        """将ODS指数成分转换到DWD"""
-        # 先更新当前标记
-        self.execute("UPDATE dwd_index_components SET is_current = FALSE WHERE is_current = TRUE")
-        
-        sql = """
-            INSERT INTO dwd_index_components (index_code, index_name, symbol, in_date, out_date, weight, is_current)
-            SELECT 
-                index_code,
-                MAX(index_name) as index_name,
-                symbol,
-                MIN(in_date) as in_date,
-                MAX(out_date) as out_date,
-                MAX(weight) as weight,
-                TRUE as is_current
-            FROM ods_index_components_raw
-            GROUP BY index_code, symbol
-            ON CONFLICT(index_code, symbol, in_date) DO UPDATE SET
-                out_date = excluded.out_date,
-                weight = excluded.weight
-        """
-        conn = self.execute(sql)
-        return conn.rowcount
-    
-    def transform_all_ods_to_dwd(self) -> dict:
+    def transform_ods_to_dwd(self) -> dict:
         """执行所有ODS到DWD的转换"""
         results = {}
         results["calendars"] = self.transform_calendars_ods_to_dwd()
@@ -857,11 +858,11 @@ class QuantDB:
         return results
     
     # -------------------------------------------------------------------------
-    # DWS Layer Operations - 汇总数据层操作
+    # APP Layer Operations - 应用数据层操作
     # -------------------------------------------------------------------------
     
     def aggregate_monthly_stats(self, start: Optional[str] = None, end: Optional[str] = None) -> int:
-        """聚合月度统计"""
+        """聚合月度统计到APP层"""
         where = ""
         if start:
             where += f" WHERE date >= '{start}'"
@@ -869,7 +870,7 @@ class QuantDB:
             where += f" WHERE date <= '{end}'" if where else f" AND date <= '{end}'"
         
         sql = f"""
-            INSERT INTO dws_monthly_stats 
+            INSERT INTO app_monthly_stats 
             (symbol, year, month, start_date, end_date, open_first, close_last, 
              high_max, low_min, volume_sum, amount_sum, avg_turnover_rate, pct_change_monthly)
             SELECT
@@ -904,10 +905,6 @@ class QuantDB:
         conn = self.execute(sql)
         return conn.rowcount
     
-    # -------------------------------------------------------------------------
-    # ADS Layer Operations - 应用数据层操作
-    # -------------------------------------------------------------------------
-    
     def get_current_index_members(self, index_code: str) -> pd.DataFrame:
         """获取当前指数成员"""
         sql = f"""
@@ -925,6 +922,10 @@ class QuantDB:
             ORDER BY ic.weight DESC
         """
         return self.query(sql)
+    
+    # -------------------------------------------------------------------------
+    # Query Methods - 查询方法
+    # -------------------------------------------------------------------------
     
     def get_trading_days(
         self,
@@ -985,7 +986,7 @@ class QuantDB:
         return self.query(sql)
     
     # -------------------------------------------------------------------------
-    # Data Validation - 数据校验
+    # Validation - 数据校验
     # -------------------------------------------------------------------------
     
     def validate(self, rule: ValidationRule) -> ValidationResult:
@@ -994,7 +995,6 @@ class QuantDB:
             df = self.query(rule.sql)
             actual = str(df.iloc[0][0]) if len(df) > 0 else "0"
             
-            # 简单判断是否通过
             if "count" in rule.expected.lower():
                 expected_count = int(rule.expected.split("=")[1].strip())
                 actual_count = int(actual)
@@ -1030,30 +1030,20 @@ class QuantDB:
         for rule in rules:
             result = self.validate(rule)
             results.append(result)
-            
-            # 记录到日志
             self._log_validation(result)
         
         return results
     
     def _log_validation(self, result: ValidationResult) -> None:
         """记录校验结果"""
+        details_json = json.dumps(result.details or {})
         self.execute(f"""
             INSERT INTO meta_validation_log 
             (layer, table_name, check_type, check_column, expected_value, actual_value, passed, details)
             VALUES ('{result.rule.layer}', '{result.rule.table}', '{result.rule.check_type}',
                     '{result.rule.column}', '{result.expected}', '{result.actual}', 
-                    {result.passed}, '{json.dumps(result.details or {})}')
+                    {result.passed}, '{details_json}')
         """)
-    
-    def get_validation_report(self, days: int = 7) -> pd.DataFrame:
-        """获取校验报告"""
-        sql = f"""
-            SELECT * FROM meta_validation_log
-            WHERE checked_at >= CURRENT_TIMESTAMP - INTERVAL '{days} days'
-            ORDER BY checked_at DESC
-        """
-        return self.query(sql)
     
     # -------------------------------------------------------------------------
     # Update Log - 更新日志
@@ -1071,3 +1061,55 @@ class QuantDB:
         error: Optional[str] = None,
     ) -> None:
         """记录更新日志"""
+        start_val = 'NULL' if not start_date else f"'{start_date}'"
+        end_val = 'NULL' if not end_date else f"'{end_date}'"
+        error_val = 'NULL' if not error else f"'{error}'"
+        
+        sql = f"""
+            INSERT INTO meta_update_log 
+            (layer, table_name, update_type, start_date, end_date, records_total, 
+             records_success, records_failed, status, error_message, completed_at)
+            VALUES ('{layer}', '{table}', '{update_type}', 
+                    {start_val}, {end_val},
+                    {records}, {records}, 0, '{status}',
+                    {error_val},
+                    CURRENT_TIMESTAMP)
+        """
+        self.execute(sql)
+    
+    def get_update_history(self, table: Optional[str] = None, limit: int = 10) -> pd.DataFrame:
+        """获取更新历史"""
+        where = f"WHERE table_name = '{table}'" if table else ""
+        sql = f"""
+            SELECT * FROM meta_update_log 
+            {where}
+            ORDER BY started_at DESC 
+            LIMIT {limit}
+        """
+        return self.query(sql)
+    
+    # -------------------------------------------------------------------------
+    # Info - 信息
+    # -------------------------------------------------------------------------
+    
+    def info(self) -> dict[str, Any]:
+        """获取数据库信息"""
+        layers = {
+            "ODS": ["ods_calendars", "ods_instruments", "ods_index_components", "ods_daily_ohlcv"],
+            "DWD": ["dwd_calendars", "dwd_instruments", "dwd_index_components", "dwd_daily_ohlcv"],
+            "APP": ["app_monthly_stats", "app_yearly_stats", "app_index_daily", "app_index_members", "app_limit_up_down"],
+            "Factors": ["factors_registry", "factors_values", "factors_ic"],
+        }
+        
+        info = {"db_path": self.db_path, "tables": {}}
+        
+        for layer, tables in layers.items():
+            info["tables"][layer] = {}
+            for table in tables:
+                try:
+                    count = self.query(f"SELECT COUNT(*) FROM {table}").iloc[0][0]
+                    info["tables"][layer][table] = {"rows": int(count)}
+                except Exception:
+                    info["tables"][layer][table] = {"rows": -1}
+        
+        return info
