@@ -16,7 +16,7 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from factors.ops import (
+from factor_pipeline.factors.ops import (
     # Operators
     Abs, Sign, Log, LogN, Sqrt, Square, Power, Exp, Tanh, Sigmoid,
     Sin, Cos, Floor, Ceil, Round, Clip,
@@ -800,4 +800,88 @@ class TestHelpers:
         assert abs(result.mean()) < 1e-10
         assert abs(result.std() - 1.0) < 1e-10
 
-    def test_decay_linear_helper(self,
+
+    def test_decay_linear_helper(self, sample_series):
+        """Positive: decay_linear helper."""
+        result = decay_linear(sample_series, window=3)
+        # Should produce weighted average
+        assert not np.isnan(result[2])
+
+
+# =============================================================================
+# Edge Cases
+# =============================================================================
+
+class TestEdgeCases:
+    """Edge case tests."""
+
+    def test_empty_array(self):
+        """Edge: Empty array."""
+        op = Mean()
+        result = op.evaluate(np.array([]), window=3)
+        assert len(result) == 0
+
+    def test_single_element(self):
+        """Edge: Single element array."""
+        op = Mean()
+        result = op.evaluate(np.array([5.0]), window=3)
+        np.testing.assert_array_equal(result, [5.0])
+
+    def test_nan_only(self):
+        """Edge: Array with only NaN values."""
+        op = Mean()
+        result = op.evaluate(np.array([np.nan, np.nan, np.nan]), window=3)
+        assert np.isnan(result[2])
+
+    def test_window_larger_than_data(self):
+        """Edge: Window size larger than data."""
+        op = Mean()
+        result = op.evaluate(np.array([1.0, 2.0]), window=10)
+        assert np.isnan(result[0])
+        assert np.isnan(result[1])
+
+    def test_very_small_values(self):
+        """Edge: Very small floating point values."""
+        op = Mean()
+        result = op.evaluate(np.array([1e-10, 1e-10, 1e-10]), window=3)
+        np.testing.assert_array_almost_equal(result[2], 1e-10)
+
+    def test_very_large_values(self):
+        """Edge: Very large floating point values."""
+        op = Mean()
+        result = op.evaluate(np.array([1e10, 1e10, 1e10]), window=3)
+        np.testing.assert_array_almost_equal(result[2], 1e10)
+
+    def test_mixed_positive_negative(self):
+        """Edge: Mixed positive and negative values."""
+        op = Mean()
+        result = op.evaluate(np.array([-5.0, 0.0, 5.0]), window=3)
+        np.testing.assert_array_almost_equal(result[2], 0.0)
+
+    def test_duplicate_values(self):
+        """Edge: Array with duplicate values."""
+        op = Mean()
+        result = op.evaluate(np.array([1.0, 1.0, 1.0, 1.0, 1.0]), window=3)
+        np.testing.assert_array_almost_equal(result[2], 1.0)
+
+    def test_increasing_sequence(self):
+        """Edge: Strictly increasing sequence."""
+        op = Corr()
+        x = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        y = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        result = op.evaluate(x, y, window=5)
+        np.testing.assert_array_almost_equal(result[4], 1.0)
+
+    def test_perfect_negative_corr(self):
+        """Edge: Perfect negative correlation."""
+        op = Corr()
+        x = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        y = np.array([5.0, 4.0, 3.0, 2.0, 1.0])
+        result = op.evaluate(x, y, window=5)
+        np.testing.assert_array_almost_equal(result[4], -1.0)
+
+    def test_zero_variance(self):
+        """Edge: Zero variance series."""
+        op = Std()
+        result = op.evaluate(np.array([1.0, 1.0, 1.0, 1.0]), window=4)
+        assert result[3] == 0.0 or np.isnan(result[3])

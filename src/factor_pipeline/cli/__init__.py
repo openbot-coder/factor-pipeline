@@ -46,8 +46,8 @@ from typing import Optional
 
 import click
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Import from factor_pipeline package
+from factor_pipeline import __version__
 
 from data.storage import DuckDBStorage
 

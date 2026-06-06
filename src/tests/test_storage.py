@@ -20,7 +20,7 @@ import pytest
 # Import the module being tested
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from data.storage import DuckDBStorage, SCHEMA_DAILY_OHLCV, SCHEMA_INSTRUMENTS
+from factor_pipeline.data.storage import DuckDBStorage, SCHEMA_DAILY_OHLCV, SCHEMA_INSTRUMENTS
 
 
 # =============================================================================

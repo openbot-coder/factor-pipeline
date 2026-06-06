@@ -65,12 +65,12 @@ class TestICAnalysis:
 
     def test_import(self):
         """Positive: Import ICAnalysis."""
-        from analysis.ic import ICAnalysis
+        from factor_pipeline.analysis.ic import ICAnalysis
         assert ICAnalysis is not None
 
     def test_spearman_ic_positive_signal(self):
         """Positive: Spearman IC with positive signal."""
-        from analysis.ic import ICAnalysis
+        from factor_pipeline.analysis.ic import ICAnalysis
 
         dates = pd.date_range("2024-01-01", periods=50, freq="B")
         stocks = [f"S{i:03d}" for i in range(20)]
@@ -93,7 +93,7 @@ class TestICAnalysis:
 
     def test_spearman_ic_no_signal(self):
         """Edge: Spearman IC with no signal (random data)."""
-        from analysis.ic import ICAnalysis
+        from factor_pipeline.analysis.ic import ICAnalysis
 
         dates = pd.date_range("2024-01-01", periods=30, freq="B")
         stocks = [f"S{i:03d}" for i in range(20)]
@@ -111,7 +111,7 @@ class TestICAnalysis:
 
     def test_pearson_ic(self):
         """Positive: Pearson IC calculation."""
-        from analysis.ic import ICAnalysis
+        from factor_pipeline.analysis.ic import ICAnalysis
 
         dates = pd.date_range("2024-01-01", periods=30, freq="B")
         stocks = [f"S{i:03d}" for i in range(20)]
@@ -129,7 +129,7 @@ class TestICAnalysis:
 
     def test_ic_ir(self, aligned_data):
         """Positive: IC Information Ratio calculation."""
-        from analysis.ic import ICAnalysis
+        from factor_pipeline.analysis.ic import ICAnalysis
 
         factor, ret = aligned_data
         ic = ICAnalysis(factor, ret)
@@ -142,7 +142,7 @@ class TestICAnalysis:
 
     def test_ic_t_stat(self, aligned_data):
         """Positive: IC t-statistic."""
-        from analysis.ic import ICAnalysis
+        from factor_pipeline.analysis.ic import ICAnalysis
 
         factor, ret = aligned_data
         ic = ICAnalysis(factor, ret)
@@ -152,7 +152,7 @@ class TestICAnalysis:
 
     def test_ic_positive_ratio(self, aligned_data):
         """Positive: IC positive ratio."""
-        from analysis.ic import ICAnalysis
+        from factor_pipeline.analysis.ic import ICAnalysis
 
         factor, ret = aligned_data
         ic = ICAnalysis(factor, ret)
@@ -162,7 +162,7 @@ class TestICAnalysis:
 
     def test_ic_with_nan(self):
         """Edge: IC calculation with NaN values."""
-        from analysis.ic import ICAnalysis
+        from factor_pipeline.analysis.ic import ICAnalysis
 
         dates = pd.date_range("2024-01-01", periods=20, freq="B")
         stocks = [f"S{i:03d}" for i in range(10)]
@@ -182,7 +182,7 @@ class TestICAnalysis:
 
     def test_ic_insufficient_data(self):
         """Edge: IC with insufficient data."""
-        from analysis.ic import ICAnalysis
+        from factor_pipeline.analysis.ic import ICAnalysis
 
         dates = pd.date_range("2024-01-01", periods=2, freq="B")
         stocks = [f"S{i:03d}" for i in range(5)]
@@ -200,7 +200,7 @@ class TestICAnalysis:
 
     def test_ic_invalid_method(self, aligned_data):
         """Negative: Invalid IC method."""
-        from analysis.ic import ICAnalysis
+        from factor_pipeline.analysis.ic import ICAnalysis
 
         factor, ret = aligned_data
         ic = ICAnalysis(factor, ret)
@@ -218,12 +218,12 @@ class TestLayeredBacktest:
 
     def test_import(self):
         """Positive: Import LayeredBacktest."""
-        from analysis.layered import LayeredBacktest
+        from factor_pipeline.analysis.layered import LayeredBacktest
         assert LayeredBacktest is not None
 
     def test_quantile_calculation(self, aligned_data):
         """Positive: Quantile calculation."""
-        from analysis.layered import LayeredBacktest
+        from factor_pipeline.analysis.layered import LayeredBacktest
 
         factor, ret = aligned_data
         lb = LayeredBacktest(factor, ret, n_quantiles=5)
@@ -234,7 +234,7 @@ class TestLayeredBacktest:
 
     def test_long_short_portfolio(self, aligned_data):
         """Positive: Long-short portfolio calculation."""
-        from analysis.layered import LayeredBacktest
+        from factor_pipeline.analysis.layered import LayeredBacktest
 
         factor, ret = aligned_data
         lb = LayeredBacktest(factor, ret, n_quantiles=5)
@@ -246,7 +246,7 @@ class TestLayeredBacktest:
 
     def test_spread_ir(self, aligned_data):
         """Positive: Long-short Information Ratio."""
-        from analysis.layered import LayeredBacktest
+        from factor_pipeline.analysis.layered import LayeredBacktest
 
         factor, ret = aligned_data
         lb = LayeredBacktest(factor, ret, n_quantiles=5)
@@ -257,7 +257,7 @@ class TestLayeredBacktest:
 
     def test_turnover(self, aligned_data):
         """Positive: Portfolio turnover calculation."""
-        from analysis.layered import LayeredBacktest
+        from factor_pipeline.analysis.layered import LayeredBacktest
 
         factor, ret = aligned_data
         lb = LayeredBacktest(factor, ret, n_quantiles=5)
@@ -267,7 +267,7 @@ class TestLayeredBacktest:
 
     def test_different_quantiles(self, aligned_data):
         """Positive: Different number of quantiles."""
-        from analysis.layered import LayeredBacktest
+        from factor_pipeline.analysis.layered import LayeredBacktest
 
         factor, ret = aligned_data
         for n_q in [2, 3, 5, 10]:
@@ -277,7 +277,7 @@ class TestLayeredBacktest:
 
     def test_quantiles_single_stock(self):
         """Edge: Quantiles with single stock (not enough for multiple quantiles)."""
-        from analysis.layered import LayeredBacktest
+        from factor_pipeline.analysis.layered import LayeredBacktest
 
         dates = pd.date_range("2024-01-01", periods=50, freq="B")
         idx = pd.MultiIndex.from_tuples(
@@ -297,7 +297,7 @@ class TestLayeredBacktest:
 
     def test_quantiles_with_nan(self):
         """Edge: Quantiles with NaN in factor."""
-        from analysis.layered import LayeredBacktest
+        from factor_pipeline.analysis.layered import LayeredBacktest
 
         dates = pd.date_range("2024-01-01", periods=30, freq="B")
         stocks = [f"S{i:03d}" for i in range(20)]
@@ -317,7 +317,7 @@ class TestLayeredBacktest:
 
     def test_rebalancing_with_infrequent_data(self):
         """Edge: Rebalancing with very infrequent data."""
-        from analysis.layered import LayeredBacktest
+        from factor_pipeline.analysis.layered import LayeredBacktest
 
         # Weekly data
         dates = pd.date_range("2024-01-01", periods=12, freq="W")
@@ -343,12 +343,12 @@ class TestFactorRegistry:
 
     def test_import(self):
         """Positive: Import FactorRegistry."""
-        from factors.registry import FactorRegistry
+        from factor_pipeline.factors.registry import FactorRegistry
         assert FactorRegistry is not None
 
     def test_register_decorator(self):
         """Positive: Register factor using decorator."""
-        from factors.registry import FactorRegistry, register_factor
+        from factor_pipeline.factors.registry import FactorRegistry, register_factor
 
         @register_factor("test_factor_001")
         def test_factor(data):
@@ -363,7 +363,7 @@ class TestFactorRegistry:
 
     def test_register_class(self):
         """Positive: Register factor class."""
-        from factors.registry import FactorRegistry, FactorBase
+        from factor_pipeline.factors.registry import FactorRegistry, FactorBase
 
         class TestFactorClass(FactorBase):
             name = "test_factor_002"
@@ -381,7 +381,7 @@ class TestFactorRegistry:
 
     def test_get_factor(self):
         """Positive: Get registered factor."""
-        from factors.registry import FactorRegistry, register_factor
+        from factor_pipeline.factors.registry import FactorRegistry, register_factor
 
         @register_factor("test_get_factor")
         def my_factor(data):
@@ -395,14 +395,14 @@ class TestFactorRegistry:
 
     def test_get_nonexistent_factor(self):
         """Negative: Get non-existent factor."""
-        from factors.registry import FactorRegistry
+        from factor_pipeline.factors.registry import FactorRegistry
 
         factor = FactorRegistry.get("nonexistent_factor_xyz")
         assert factor is None
 
     def test_list_factors(self):
         """Positive: List all registered factors."""
-        from factors.registry import FactorRegistry
+        from factor_pipeline.factors.registry import FactorRegistry
 
         names = FactorRegistry.list()
         assert isinstance(names, list)
@@ -410,7 +410,7 @@ class TestFactorRegistry:
 
     def test_register_duplicate(self):
         """Edge: Register duplicate factor name."""
-        from factors.registry import FactorRegistry, register_factor
+        from factor_pipeline.factors.registry import FactorRegistry, register_factor
 
         @register_factor("test_duplicate")
         def factor_a(data):
@@ -427,7 +427,7 @@ class TestFactorRegistry:
 
     def test_info(self):
         """Positive: Get factor info."""
-        from factors.registry import FactorRegistry, register_factor
+        from factor_pipeline.factors.registry import FactorRegistry, register_factor
 
         @register_factor("test_info_factor")
         def info_factor(data):
@@ -443,14 +443,14 @@ class TestFactorRegistry:
 
     def test_info_nonexistent(self):
         """Edge: Get info for non-existent factor."""
-        from factors.registry import FactorRegistry
+        from factor_pipeline.factors.registry import FactorRegistry
 
         info = FactorRegistry.info("nonexistent_info_factor_xyz")
         assert info["found"] is False
 
     def test_clear_registry(self):
         """Edge: Clear registry."""
-        from factors.registry import FactorRegistry, register_factor
+        from factor_pipeline.factors.registry import FactorRegistry, register_factor
 
         @register_factor("test_clear")
         def clear_factor(data):
@@ -462,7 +462,7 @@ class TestFactorRegistry:
 
     def test_load_gtja_factors(self):
         """Positive: Load GTJA 191 factors."""
-        from factors.registry import FactorRegistry
+        from factor_pipeline.factors.registry import FactorRegistry
         import importlib
 
         importlib.import_module("factors.gtja191")
@@ -473,7 +473,7 @@ class TestFactorRegistry:
 
     def test_load_technical_factors(self):
         """Positive: Load technical factors."""
-        from factors.registry import FactorRegistry
+        from factor_pipeline.factors.registry import FactorRegistry
         import importlib
 
         importlib.import_module("factors.technical")
@@ -492,8 +492,8 @@ class TestIntegration:
 
     def test_full_pipeline_ic_to_layered(self, aligned_data):
         """Positive: Full pipeline from IC to layered backtest."""
-        from analysis.ic import ICAnalysis
-        from analysis.layered import LayeredBacktest
+        from factor_pipeline.analysis.ic import ICAnalysis
+        from factor_pipeline.analysis.layered import LayeredBacktest
 
         factor, ret = aligned_data
 
@@ -511,8 +511,8 @@ class TestIntegration:
 
     def test_factor_calculation_pipeline(self):
         """Positive: Factor calculation with GTJA factor."""
-        from factors.registry import FactorRegistry
-        from analysis.ic import ICAnalysis
+        from factor_pipeline.factors.registry import FactorRegistry
+        from factor_pipeline.analysis.ic import ICAnalysis
         import importlib
 
         # Load factors
@@ -544,8 +544,8 @@ class TestIntegration:
 
     def test_multiple_factors_ic(self):
         """Positive: Calculate IC for multiple factors."""
-        from factors.registry import FactorRegistry
-        from analysis.ic import ICAnalysis
+        from factor_pipeline.factors.registry import FactorRegistry
+        from factor_pipeline.analysis.ic import ICAnalysis
         import importlib
 
         # Load factors
@@ -591,7 +591,7 @@ class TestEdgeCases:
 
     def test_empty_factor(self):
         """Edge: Empty factor Series."""
-        from analysis.ic import ICAnalysis
+        from factor_pipeline.analysis.ic import ICAnalysis
 
         dates = pd.date_range("2024-01-01", periods=20, freq="B")
         stocks = [f"S{i:03d}" for i in range(10)]
@@ -610,7 +610,7 @@ class TestEdgeCases:
 
     def test_constant_factor(self):
         """Edge: Constant factor (no variation)."""
-        from analysis.ic import ICAnalysis
+        from factor_pipeline.analysis.ic import ICAnalysis
 
         dates = pd.date_range("2024-01-01", periods=20, freq="B")
         stocks = [f"S{i:03d}" for i in range(10)]
@@ -627,7 +627,7 @@ class TestEdgeCases:
 
     def test_single_date(self):
         """Edge: Single date in data."""
-        from analysis.ic import ICAnalysis
+        from factor_pipeline.analysis.ic import ICAnalysis
 
         stocks = [f"S{i:03d}" for i in range(10)]
         idx = pd.MultiIndex.from_tuples(
@@ -647,7 +647,7 @@ class TestEdgeCases:
 
     def test_mismatched_indices(self):
         """Edge: Mismatched MultiIndex in factor and return."""
-        from analysis.ic import ICAnalysis
+        from factor_pipeline.analysis.ic import ICAnalysis
 
         dates1 = pd.date_range("2024-01-01", periods=50, freq="B")
         stocks1 = [f"S{i:03d}" for i in range(20)]

@@ -25,15 +25,15 @@ jobs:
 
       - name: Check code format (Black)
         run: |
-          black --check --diff .
+          black --check --diff src/
 
       - name: Lint with Ruff
         run: |
-          ruff check .
+          ruff check src/
 
       - name: Type check with MyPy
         run: |
-          mypy factors data analysis --ignore-missing-imports || true
+          mypy src/factor_pipeline --ignore-missing-imports || true
 
   test:
     name: Unit Tests
@@ -53,7 +53,7 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest tests/ -v --tb=short
+          pytest src/tests/ -v --tb=short
 
   build:
     name: Build & Package
@@ -78,4 +78,4 @@ jobs:
       - name: Check package
         run: |
           pip install dist/*.whl --force-reinstall
-          python -c "from factors import FactorRegistry; print(f'Factors: {FactorRegistry.count()}')"
+          python -c "from factor_pipeline.factors.registry import FactorRegistry; print(f'Package installed successfully')"

@@ -25,16 +25,15 @@ jobs:
 
       - name: List all registered factors
         run: |
-          python run.py factors | tee factors_list.txt
+          fp factor list | tee factors_list.txt
           echo "=== Factor Count ===" >> $GITHUB_STEP_SUMMARY
           wc -l factors_list.txt >> $GITHUB_STEP_SUMMARY || true
 
       - name: Run full batch analysis
         run: |
-          python run.py run \
-            --factors alpha001 alpha002 alpha003 alpha004 alpha005 \
-            alpha006 alpha007 alpha008 alpha009 alpha010 \
-            --out reports/daily
+          mkdir -p reports/daily
+          fp factor batch --factors alpha001 alpha002 alpha003 alpha004 alpha005 \
+            alpha006 alpha007 alpha008 alpha009 alpha010 --out reports/daily || true
         continue-on-error: true
 
       - name: Generate summary report

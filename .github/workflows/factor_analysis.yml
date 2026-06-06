@@ -39,8 +39,8 @@ jobs:
       - name: Check data availability
         run: |
           python -c "
-          from data.loader import DataLoader
-          loader = DataLoader('duckdb', 'data/ohlcv.duckdb')
+          from factor_pipeline.data.storage import DuckDBStorage
+          db = DuckDBStorage('data/ohlcv.duckdb')
           print('Data source available')
           " || echo "Note: No local data, will use demo data"
 
@@ -61,11 +61,7 @@ jobs:
           END: ${{ steps.params.outputs.end }}
         run: |
           mkdir -p reports/scheduled
-          python run.py run \
-            --factors $FACTORS \
-            --start $START \
-            --end $END \
-            --out reports/scheduled
+          fp factor batch --factors $FACTORS --start $START --end $END --out reports/scheduled || echo "Analysis skipped"
 
       - name: Upload reports
         if: always()

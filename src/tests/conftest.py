@@ -11,8 +11,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add src to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
 # =============================================================================
@@ -171,21 +171,21 @@ def sample_dates():
 @pytest.fixture
 def storage_module():
     """Import and return storage module."""
-    from data.storage import DuckDBStorage
+    from factor_pipeline.data.storage import DuckDBStorage
     return DuckDBStorage
 
 
 @pytest.fixture
 def ops_module():
     """Import and return ops module."""
-    from factors import ops as ops_module
+    from factor_pipeline.factors import ops as ops_module
     return ops_module
 
 
 @pytest.fixture
 def registry_module():
     """Import and return registry module."""
-    from factors.registry import FactorRegistry
+    from factor_pipeline.factors.registry import FactorRegistry
     return FactorRegistry
 
 
@@ -196,7 +196,7 @@ def registry_module():
 @pytest.fixture(autouse=True)
 def reset_factor_registry():
     """Reset factor registry before each test."""
-    from factors.registry import FactorRegistry
+    from factor_pipeline.factors.registry import FactorRegistry
     # Store original state
     original = FactorRegistry._factors.copy()
     yield
