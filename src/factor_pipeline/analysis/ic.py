@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import numpy as np
+from dataclasses import dataclass, field
+
 import pandas as pd
 from scipy import stats
-from dataclasses import dataclass, field
 
 
 @dataclass
@@ -13,7 +13,7 @@ class ICResult:
     ic_series: pd.Series = field(default_factory=pd.Series)
     ic_mean: float = 0.0
     ic_std: float = 0.0
-    ir: float = 0.0          # IC mean / IC std (information ratio)
+    ir: float = 0.0  # IC mean / IC std (information ratio)
     rank_ic_mean: float = 0.0
     rank_ic_std: float = 0.0
     rank_ir: float = 0.0
@@ -89,12 +89,14 @@ class ICAnalysis:
 
     def summary(self) -> pd.DataFrame:
         r = self.run()
-        return pd.DataFrame({
-            "IC Mean": [r.ic_mean],
-            "IC Std": [r.ic_std],
-            "IR": [r.ir],
-            "IC > 0 %": [r.ic_positive_ratio],
-            "t-stat": [r.t_stat],
-            "p-value": [r.p_value],
-            "N days": [r.n_days],
-        })
+        return pd.DataFrame(
+            {
+                "IC Mean": [r.ic_mean],
+                "IC Std": [r.ic_std],
+                "IR": [r.ir],
+                "IC > 0 %": [r.ic_positive_ratio],
+                "t-stat": [r.t_stat],
+                "p-value": [r.p_value],
+                "N days": [r.n_days],
+            }
+        )

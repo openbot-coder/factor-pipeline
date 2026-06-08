@@ -12,34 +12,89 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from factor_pipeline.factors.ops import (
-    # Operators
-    Abs, Sign, Log, LogN, Sqrt, Square, Power, Exp, Tanh, Sigmoid,
-    Sin, Cos, Floor, Ceil, Round, Clip,
-    Add, Sub, Mul, Div, Mod,
-    Ref, Delta, Sum, Mean, Std, Var, Max, Min, Median, Skew, Kurt,
-    Prod, Count, Sem, First, Last,
-    Corr, Cov, Beta,
-    Rank, Quantile, Decile,
-    TsRank, TsQuantile,
-    DecayLinear, DecayExp, WMA, EMA, SMA,
-    Iif, Where, IsNa, NotNa, FillNa,
-    TsMax, TsMin, ArgMax, ArgMin, Shift, RollingSum,
-    Scale, ZScore, RollingZScore, Return, PctChange,
-    # Helper functions
-    rolling_mean, rolling_std, ts_rank, ts_corr, cs_rank, cs_zscore, decay_linear,
+    EMA,
     # Registry
-    OperatorRegistry, REGISTRY,
+    REGISTRY,
+    SMA,
+    WMA,
+    # Operators
+    Abs,
+    Add,
+    ArgMax,
+    ArgMin,
+    Beta,
+    Ceil,
+    Clip,
+    Corr,
+    Count,
+    Cov,
+    DecayExp,
+    DecayLinear,
+    Decile,
+    Delta,
+    Div,
+    Exp,
+    FillNa,
+    First,
+    Floor,
+    Iif,
+    IsNa,
+    Kurt,
+    Last,
+    Log,
+    Max,
+    Mean,
+    Median,
+    Min,
+    Mod,
+    Mul,
+    NotNa,
+    PctChange,
+    Power,
+    Prod,
+    Quantile,
+    Rank,
+    Ref,
+    Return,
+    RollingSum,
+    RollingZScore,
+    Round,
+    Scale,
+    Sem,
+    Shift,
+    Sigmoid,
+    Sign,
+    Skew,
+    Sqrt,
+    Square,
+    Std,
+    Sub,
+    Sum,
+    Tanh,
+    TsMax,
+    TsMin,
+    TsRank,
+    Var,
+    Where,
+    ZScore,
+    cs_rank,
+    cs_zscore,
+    decay_linear,
+    # Helper functions
+    rolling_mean,
+    rolling_std,
+    ts_corr,
+    ts_rank,
 )
-
 
 # =============================================================================
 # Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def sample_series():
@@ -70,6 +125,7 @@ def two_series():
 # =============================================================================
 # Registry Tests
 # =============================================================================
+
 
 class TestRegistry:
     """Tests for operator registry."""
@@ -105,6 +161,7 @@ class TestRegistry:
 # =============================================================================
 # Unary Math Operator Tests
 # =============================================================================
+
 
 class TestUnaryMathOps:
     """Tests for unary math operators."""
@@ -240,6 +297,7 @@ class TestUnaryMathOps:
 # Binary Math Operator Tests
 # =============================================================================
 
+
 class TestBinaryMathOps:
     """Tests for binary math operators."""
 
@@ -284,6 +342,7 @@ class TestBinaryMathOps:
 # Time Series Operator Tests
 # =============================================================================
 
+
 class TestTimeSeriesOps:
     """Tests for time series operators."""
 
@@ -291,7 +350,7 @@ class TestTimeSeriesOps:
         """Positive: Ref shifts by period."""
         op = Ref()
         result = op.evaluate(sample_series, period=1)
-        expected = np.array([np.nan, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0])
+        np.array([np.nan, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0])
         np.testing.assert_array_equal(np.isnan(result[:1]), [True])
         np.testing.assert_array_almost_equal(result[1:], sample_series[:-1])
 
@@ -435,6 +494,7 @@ class TestTimeSeriesOps:
 # Two Series Operator Tests
 # =============================================================================
 
+
 class TestTwoSeriesOps:
     """Tests for operators with two time series."""
 
@@ -474,6 +534,7 @@ class TestTwoSeriesOps:
 # =============================================================================
 # Cross-sectional Operator Tests
 # =============================================================================
+
 
 class TestCrossSectionalOps:
     """Tests for cross-sectional operators."""
@@ -519,6 +580,7 @@ class TestCrossSectionalOps:
 # Time Series Ranking Tests
 # =============================================================================
 
+
 class TestTimeSeriesRankingOps:
     """Tests for time series ranking operators."""
 
@@ -537,7 +599,7 @@ class TestTimeSeriesRankingOps:
         op = TsRank()
         result = op.evaluate(data, window=5)
         # Increasing: position 0->1, 1->2, etc.
-        np.testing.assert_array_almost_equal(result[2], 1.0/3)
+        np.testing.assert_array_almost_equal(result[2], 1.0 / 3)
         np.testing.assert_array_almost_equal(result[4], 1.0)
 
     def test_ts_rank_decreasing(self):
@@ -553,6 +615,7 @@ class TestTimeSeriesRankingOps:
 # Decay Operator Tests
 # =============================================================================
 
+
 class TestDecayOps:
     """Tests for decay operators."""
 
@@ -562,7 +625,7 @@ class TestDecayOps:
         result = op.evaluate(sample_series, window=3)
         # Weights: [1,2,3]/6, [2,3,4]/9, [3,4,5]/12
         # Index 2: (1*1 + 2*2 + 3*3)/6 = 14/6
-        np.testing.assert_array_almost_equal(result[2], 14.0/6)
+        np.testing.assert_array_almost_equal(result[2], 14.0 / 6)
 
     def test_decay_exp_basic(self, sample_series):
         """Positive: Exponential decay weighted average."""
@@ -578,7 +641,7 @@ class TestDecayOps:
         result = op.evaluate(sample_series, window=3)
         # Weights: [1,2,3]/6
         # Index 2: (1*1 + 2*2 + 3*3)/6 = 14/6
-        np.testing.assert_array_almost_equal(result[2], 14.0/6)
+        np.testing.assert_array_almost_equal(result[2], 14.0 / 6)
 
     def test_ema_basic(self, sample_series):
         """Positive: Exponential moving average."""
@@ -598,6 +661,7 @@ class TestDecayOps:
 # =============================================================================
 # Conditional Operator Tests
 # =============================================================================
+
 
 class TestConditionalOps:
     """Tests for conditional operators."""
@@ -654,6 +718,7 @@ class TestConditionalOps:
 # =============================================================================
 # Advanced Operator Tests
 # =============================================================================
+
 
 class TestAdvancedOps:
     """Tests for advanced operators."""
@@ -765,6 +830,7 @@ class TestAdvancedOps:
 # Helper Function Tests
 # =============================================================================
 
+
 class TestHelpers:
     """Tests for helper functions."""
 
@@ -800,7 +866,6 @@ class TestHelpers:
         assert abs(result.mean()) < 1e-10
         assert abs(result.std() - 1.0) < 1e-10
 
-
     def test_decay_linear_helper(self, sample_series):
         """Positive: decay_linear helper."""
         result = decay_linear(sample_series, window=3)
@@ -811,6 +876,7 @@ class TestHelpers:
 # =============================================================================
 # Edge Cases
 # =============================================================================
+
 
 class TestEdgeCases:
     """Edge case tests."""

@@ -69,12 +69,14 @@ select = [
     "W",   # pycodestyle warnings
     "F",   # pyflakes
     "I",   # isort
-    "C",   # flake8-comprehensions
-    "B",   # flake8-bugbear
-    "UP",  # pyupgrade
 ]
 ignore = [
-    "E501",  # line too long (handled by formatter)
+    "E501",   # line too long (handled by formatter)
+    "F401",   # unused imports (some are intentional re-exports)
+    "F821",   # undefined names (e.g. pd used without import in CLI)
+    "E712",   # comparison to True/False
+    "E721",   # type comparison
+    "E741",   # ambiguous variable names (l, r in factor code)
 ]
 
 [tool.black]

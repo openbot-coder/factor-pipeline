@@ -30,15 +30,15 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
-
 # =============================================================================
 # 1. Tokenizer
 # =============================================================================
+
 
 class TT(Enum):
     NUMBER = auto()
@@ -80,56 +80,75 @@ def tokenize(expr: str) -> list[Token]:
         if ch.isspace():
             i += 1
             continue
-        if ch == '$':
+        if ch == "$":
             start = i + 1
             i = start  # advance past '$' before reading name
-            while i < n and (expr[i].isalnum() or expr[i] == '_'):
+            while i < n and (expr[i].isalnum() or expr[i] == "_"):
                 i += 1
             var_name = expr[start:i]
             if var_name.lower() not in QLIB_COLUMNS:
                 raise SyntaxError(f"Unknown $ variable: ${var_name} at pos {start}")
             tokens.append(Token(TT.DOLLAR_VAR, var_name.lower(), start))
             continue
-        if ch.isdigit() or (ch == '.' and i + 1 < n and expr[i + 1].isdigit()):
+        if ch.isdigit() or (ch == "." and i + 1 < n and expr[i + 1].isdigit()):
             start = i
-            has_dot = ch == '.'
+            has_dot = ch == "."
             i += 1
-            while i < n and (expr[i].isdigit() or (expr[i] == '.' and not has_dot)):
-                if expr[i] == '.':
+            while i < n and (expr[i].isdigit() or (expr[i] == "." and not has_dot)):
+                if expr[i] == ".":
                     has_dot = True
                 i += 1
             tokens.append(Token(TT.NUMBER, expr[start:i], start))
             continue
-        if ch.isalpha() or ch == '_':
+        if ch.isalpha() or ch == "_":
             start = i
-            while i < n and (expr[i].isalnum() or expr[i] == '_'):
+            while i < n and (expr[i].isalnum() or expr[i] == "_"):
                 i += 1
             word = expr[start:i]
             tokens.append(Token(TT.IDENT, word, start))
             continue
         # Two-char comparison operators first
-        if ch == '>' and i + 1 < n and expr[i + 1] == '=':
-            tokens.append(Token(TT.GTE, '>=', i)); i += 2; continue
-        if ch == '<' and i + 1 < n and expr[i + 1] == '=':
-            tokens.append(Token(TT.LTE, '<=', i)); i += 2; continue
-        if ch == '!' and i + 1 < n and expr[i + 1] == '=':
-            tokens.append(Token(TT.NEQ, '!=', i)); i += 2; continue
-        if ch == '=' and i + 1 < n and expr[i + 1] == '=':
-            tokens.append(Token(TT.EQ, '==', i)); i += 2; continue
+        if ch == ">" and i + 1 < n and expr[i + 1] == "=":
+            tokens.append(Token(TT.GTE, ">=", i))
+            i += 2
+            continue
+        if ch == "<" and i + 1 < n and expr[i + 1] == "=":
+            tokens.append(Token(TT.LTE, "<=", i))
+            i += 2
+            continue
+        if ch == "!" and i + 1 < n and expr[i + 1] == "=":
+            tokens.append(Token(TT.NEQ, "!=", i))
+            i += 2
+            continue
+        if ch == "=" and i + 1 < n and expr[i + 1] == "=":
+            tokens.append(Token(TT.EQ, "==", i))
+            i += 2
+            continue
         # Single-char ops
-        _SIMPLE = {'+': TT.PLUS, '-': TT.MINUS, '*': TT.STAR, '/': TT.SLASH,
-                    '(': TT.LPAREN, ')': TT.RPAREN, ',': TT.COMMA,
-                    '>': TT.GT, '<': TT.LT}
+        _SIMPLE = {
+            "+": TT.PLUS,
+            "-": TT.MINUS,
+            "*": TT.STAR,
+            "/": TT.SLASH,
+            "(": TT.LPAREN,
+            ")": TT.RPAREN,
+            ",": TT.COMMA,
+            ">": TT.GT,
+            "<": TT.LT,
+        }
         if ch in _SIMPLE:
-            tokens.append(Token(_SIMPLE[ch], ch, i)); i += 1; continue
+            tokens.append(Token(_SIMPLE[ch], ch, i))
+            i += 1
+            continue
         raise SyntaxError(f"Unexpected character '{ch}' at position {i}")
-    tokens.append(Token(TT.EOF, '', len(expr)))
+    tokens.append(Token(TT.EOF, "", len(expr)))
     return tokens
 
 
 # =============================================================================
 # 2. AST Nodes
 # =============================================================================
+
 
 class NodeKind(Enum):
     COLUMN = auto()
@@ -144,7 +163,7 @@ class NodeKind(Enum):
 class ASTNode:
     kind: NodeKind
     value: Any = None
-    children: list['ASTNode'] = field(default_factory=list)
+    children: list[ASTNode] = field(default_factory=list)
 
     def __repr__(self):
         if self.kind == NodeKind.COLUMN:
@@ -166,6 +185,7 @@ class ASTNode:
 # =============================================================================
 # 3. Parser (recursive descent)
 # =============================================================================
+
 
 class Parser:
     def __init__(self, tokens: list[Token]):
@@ -221,7 +241,7 @@ class Parser:
     def unary(self) -> ASTNode:
         if self.peek().tt == TT.MINUS:
             self.advance()
-            return ASTNode(NodeKind.UNARY, '-', [self.unary()])
+            return ASTNode(NodeKind.UNARY, "-", [self.unary()])
         if self.peek().tt == TT.PLUS:
             self.advance()
             return self.unary()
@@ -267,7 +287,7 @@ def parse(expr: str) -> ASTNode:
 # 4. DuckDB SQL Compiler
 # =============================================================================
 
-_SQL_CMPOP = {'>': '>', '<': '<', '>=': '>=', '<=': '<=', '==': '=', '!=': '!='}
+_SQL_CMPOP = {">": ">", "<": "<", ">=": ">=", "<=": "<=", "==": "=", "!=": "!="}
 
 
 class SQLCompiler:
@@ -284,9 +304,14 @@ class SQLCompiler:
             Required when universe is a pool ID string. E.g. '/path/to/quantdb.duckdb'
     """
 
-    def __init__(self, table: str = "daily_kline", date_col: str = "date",
-                 code_col: str = "code", universe: str | None = None,
-                 instruments_db: str | None = None):
+    def __init__(
+        self,
+        table: str = "daily_kline",
+        date_col: str = "date",
+        code_col: str = "code",
+        universe: str | None = None,
+        instruments_db: str | None = None,
+    ):
         self.table = table
         self.date_col = date_col
         self.code_col = code_col
@@ -485,8 +510,7 @@ class SQLCompiler:
                 from_cte = f"step{self._cte_counter}" if self._cte_counter > 0 else "base"
                 cols = f"{c1_sql} AS {c1_alias}, {c2_sql} AS {c2_alias}"
                 self._new_cte(
-                    f"SELECT {self.date_col}, {self.code_col}, {cols}\n"
-                    f"    FROM {from_cte}"
+                    f"SELECT {self.date_col}, {self.code_col}, {cols}\n" f"    FROM {from_cte}"
                 )
             return self._over(f"CORR({c1_alias}, {c2_alias})", w)
 
@@ -499,8 +523,7 @@ class SQLCompiler:
                 from_cte = f"step{self._cte_counter}" if self._cte_counter > 0 else "base"
                 cols = f"{c1_sql} AS {c1_alias}, {c2_sql} AS {c2_alias}"
                 self._new_cte(
-                    f"SELECT {self.date_col}, {self.code_col}, {cols}\n"
-                    f"    FROM {from_cte}"
+                    f"SELECT {self.date_col}, {self.code_col}, {cols}\n" f"    FROM {from_cte}"
                 )
             return self._over(f"COVAR_SAMP({c1}, {c2})", w)
 
@@ -519,8 +542,7 @@ class SQLCompiler:
 
         raise ValueError(f"Unknown function: {name}")
 
-    def compile(self, ast: ASTNode, start: str = "2020-01-01",
-                end: str = "2026-12-31") -> str:
+    def compile(self, ast: ASTNode, start: str = "2020-01-01", end: str = "2026-12-31") -> str:
         """Compile AST to full DuckDB SQL query."""
         self._ctes = []
         self._cte_counter = 0
@@ -571,10 +593,16 @@ ORDER BY {self.date_col}, {self.code_col}"""
 SQL_CMPOP = _SQL_CMPOP  # expose for _sql in CMP branch
 
 
-def compile_sql(expr: str, table: str = "daily_ohlcv", date_col: str = "date",
-                code_col: str = "symbol", start: str = "2020-01-01",
-                end: str = "2026-12-31", universe: str | None = None,
-                instruments_db: str | None = None) -> str:
+def compile_sql(
+    expr: str,
+    table: str = "daily_ohlcv",
+    date_col: str = "date",
+    code_col: str = "symbol",
+    start: str = "2020-01-01",
+    end: str = "2026-12-31",
+    universe: str | None = None,
+    instruments_db: str | None = None,
+) -> str:
     """Compile a Qlib expression string to DuckDB SQL.
 
     Args:
@@ -583,19 +611,24 @@ def compile_sql(expr: str, table: str = "daily_ohlcv", date_col: str = "date",
         instruments_db: Path to DuckDB with instruments table. Required when universe is pool_id.
     """
     ast = parse(expr)
-    return SQLCompiler(table=table, date_col=date_col, code_col=code_col,
-                       universe=universe, instruments_db=instruments_db).compile(ast, start, end)
+    return SQLCompiler(
+        table=table,
+        date_col=date_col,
+        code_col=code_col,
+        universe=universe,
+        instruments_db=instruments_db,
+    ).compile(ast, start, end)
 
 
 # =============================================================================
 # 5. Pandas Compiler
 # =============================================================================
 
+
 class PandasCompiler:
     """Compile AST to a pandas Series on a multi-stock DataFrame."""
 
-    def __init__(self, df: pd.DataFrame, date_col: str = "date",
-                 code_col: str = "code"):
+    def __init__(self, df: pd.DataFrame, date_col: str = "date", code_col: str = "code"):
         self.df = df.sort_values([date_col, code_col]).reset_index(drop=True)
         self.date_col = date_col
         self.code_col = code_col
@@ -619,14 +652,24 @@ class PandasCompiler:
 
         if node.kind == NodeKind.BINARY:
             l, r = self._pd(node.children[0]), self._pd(node.children[1])
-            ops = {'+': lambda a, b: a + b, '-': lambda a, b: a - b,
-                   '*': lambda a, b: a * b, '/': lambda a, b: a / b.replace(0, np.nan)}
+            ops = {
+                "+": lambda a, b: a + b,
+                "-": lambda a, b: a - b,
+                "*": lambda a, b: a * b,
+                "/": lambda a, b: a / b.replace(0, np.nan),
+            }
             return ops[node.value](l, r)
 
         if node.kind == NodeKind.CMP:
             l, r = self._pd(node.children[0]), self._pd(node.children[1])
-            cmps = {'>': l.__gt__, '<': l.__lt__, '>=': l.__ge__,
-                    '<=': l.__le__, '==': l.__eq__, '!=': l.__ne__}
+            cmps = {
+                ">": l.__gt__,
+                "<": l.__lt__,
+                ">=": l.__ge__,
+                "<=": l.__le__,
+                "==": l.__eq__,
+                "!=": l.__ne__,
+            }
             return cmps[node.value](r).astype(float)
 
         if node.kind == NodeKind.FUNC:
@@ -697,24 +740,31 @@ class PandasCompiler:
         if name == "TS_RANK":
             c = self._col(args[0])
             w = int(args[1].value) if len(args) > 1 else 10
+
             def _rrank(s):
                 return s.rolling(w, min_periods=w).apply(
-                    lambda x: pd.Series(x).rank(pct=True).iloc[-1], raw=False)
+                    lambda x: pd.Series(x).rank(pct=True).iloc[-1], raw=False
+                )
+
             return g[c.name].apply(_rrank).droplevel(0)
 
         if name == "CORR":
             c1, c2 = self._col(args[0]), self._col(args[1])
             w = int(args[2].value) if len(args) > 2 else 20
-            return g.apply(
-                lambda g: g[c1.name].rolling(w, min_periods=w).corr(g[c2.name])
-            ).droplevel(0).sort_index()
+            return (
+                g.apply(lambda g: g[c1.name].rolling(w, min_periods=w).corr(g[c2.name]))
+                .droplevel(0)
+                .sort_index()
+            )
 
         if name == "COV":
             c1, c2 = self._col(args[0]), self._col(args[1])
             w = int(args[2].value) if len(args) > 2 else 20
-            return g.apply(
-                lambda g: g[c1.name].rolling(w, min_periods=w).cov(g[c2.name])
-            ).droplevel(0).sort_index()
+            return (
+                g.apply(lambda g: g[c1.name].rolling(w, min_periods=w).cov(g[c2.name]))
+                .droplevel(0)
+                .sort_index()
+            )
 
         if name in ("IIF", "IF"):
             cond = self._pd(args[0])
@@ -733,8 +783,9 @@ class PandasCompiler:
         return self._pd(ast)
 
 
-def compute_pandas(df: pd.DataFrame, expr: str, date_col: str = "date",
-                   code_col: str = "symbol") -> pd.Series:
+def compute_pandas(
+    df: pd.DataFrame, expr: str, date_col: str = "date", code_col: str = "symbol"
+) -> pd.Series:
     """Compute a Qlib expression on a pandas DataFrame."""
     ast = parse(expr)
     return PandasCompiler(df, date_col=date_col, code_col=code_col).compute(ast)
@@ -743,6 +794,7 @@ def compute_pandas(df: pd.DataFrame, expr: str, date_col: str = "date",
 # =============================================================================
 # 6. High-level Engine
 # =============================================================================
+
 
 class ExprEngine:
     """High-level engine bridging expressions to DuckDB or Pandas computation.
@@ -753,9 +805,15 @@ class ExprEngine:
         instruments_db: Path to DuckDB with instruments table. Required when universe is pool_id.
     """
 
-    def __init__(self, db_path: str | None = None, table: str = "daily_ohlcv",
-                 date_col: str = "date", code_col: str = "symbol",
-                 universe: str | None = None, instruments_db: str | None = None):
+    def __init__(
+        self,
+        db_path: str | None = None,
+        table: str = "daily_ohlcv",
+        date_col: str = "date",
+        code_col: str = "symbol",
+        universe: str | None = None,
+        instruments_db: str | None = None,
+    ):
         self.db_path = db_path
         self.table = table
         self.date_col = date_col
@@ -763,25 +821,44 @@ class ExprEngine:
         self.universe = universe
         self.instruments_db = instruments_db
 
-    def compile_sql(self, expr: str, start: str = "2020-01-01",
-                    end: str = "2026-12-31", universe: str | None = None) -> str:
+    def compile_sql(
+        self,
+        expr: str,
+        start: str = "2020-01-01",
+        end: str = "2026-12-31",
+        universe: str | None = None,
+    ) -> str:
         """Compile expression to DuckDB SQL.
 
         Args:
             universe: Override universe filter. If None, use engine default.
         """
         u = universe if universe is not None else self.universe
-        return compile_sql(expr, self.table, self.date_col, self.code_col, start, end,
-                           universe=u, instruments_db=self.instruments_db)
+        return compile_sql(
+            expr,
+            self.table,
+            self.date_col,
+            self.code_col,
+            start,
+            end,
+            universe=u,
+            instruments_db=self.instruments_db,
+        )
 
-    def compute_sql(self, expr: str, start: str = "2020-01-01",
-                    end: str = "2026-12-31", universe: str | None = None) -> pd.DataFrame:
+    def compute_sql(
+        self,
+        expr: str,
+        start: str = "2020-01-01",
+        end: str = "2026-12-31",
+        universe: str | None = None,
+    ) -> pd.DataFrame:
         """Compute expression via DuckDB SQL.
 
         Args:
             universe: Override universe filter. If None, use engine default.
         """
         import duckdb
+
         sql = self.compile_sql(expr, start, end, universe=universe)
         con = duckdb.connect(self.db_path, read_only=True)
         try:
@@ -792,9 +869,15 @@ class ExprEngine:
     def compute_pandas(self, df: pd.DataFrame, expr: str) -> pd.Series:
         return compute_pandas(df, expr, self.date_col, self.code_col)
 
-    def factor(self, expr: str, name: str = "factor", start: str = "2020-01-01",
-               end: str = "2026-12-31", backend: str = "duckdb",
-               universe: str | None = None) -> pd.DataFrame:
+    def factor(
+        self,
+        expr: str,
+        name: str = "factor",
+        start: str = "2020-01-01",
+        end: str = "2026-12-31",
+        backend: str = "duckdb",
+        universe: str | None = None,
+    ) -> pd.DataFrame:
         """Expression → factor DataFrame.
 
         Args:
@@ -802,8 +885,8 @@ class ExprEngine:
         """
         if backend == "duckdb":
             df = self.compute_sql(expr, start, end, universe=universe)
-            if 'factor' in df.columns:
-                df = df.rename(columns={'factor': name})
+            if "factor" in df.columns:
+                df = df.rename(columns={"factor": name})
             return df
         raise ValueError("Pandas backend requires passing a DataFrame directly")
 
@@ -818,25 +901,39 @@ class ExprEngine:
 # 7. CLI
 # =============================================================================
 
+
 def _cli():
     import argparse
+
     p = argparse.ArgumentParser(description="Qlib Expression Engine")
-    p.add_argument("expr", help="Qlib expression, e.g. '($close - Ref($close, 1)) / Ref($close, 1)'")
+    p.add_argument(
+        "expr", help="Qlib expression, e.g. '($close - Ref($close, 1)) / Ref($close, 1)'"
+    )
     p.add_argument("--backend", choices=["duckdb", "pandas"], default="duckdb")
     p.add_argument("--db", default=None, help="DuckDB path (for duckdb backend)")
     p.add_argument("--table", default="daily_kline")
     p.add_argument("--start", default="2020-01-01")
     p.add_argument("--end", default="2026-12-31")
-    p.add_argument("--universe", default=None,
-                   help="Stock pool filter: pool_id (e.g. 'csi500') or SQL subquery")
-    p.add_argument("--instruments-db", default=None,
-                   help="Path to DuckDB with instruments table (required when universe is pool_id)")
+    p.add_argument(
+        "--universe",
+        default=None,
+        help="Stock pool filter: pool_id (e.g. 'csi500') or SQL subquery",
+    )
+    p.add_argument(
+        "--instruments-db",
+        default=None,
+        help="Path to DuckDB with instruments table (required when universe is pool_id)",
+    )
     p.add_argument("--explain", action="store_true", help="Print AST + SQL, don't execute")
     args = p.parse_args()
 
     if args.explain:
-        engine = ExprEngine(db_path=args.db, table=args.table,
-                            universe=args.universe, instruments_db=args.instruments_db)
+        engine = ExprEngine(
+            db_path=args.db,
+            table=args.table,
+            universe=args.universe,
+            instruments_db=args.instruments_db,
+        )
         info = engine.explain(args.expr)
         print("=== AST ===")
         print(info["ast"])
@@ -848,8 +945,12 @@ def _cli():
         if not args.db:
             print("Error: --db required for duckdb backend")
             sys.exit(1)
-        engine = ExprEngine(db_path=args.db, table=args.table,
-                            universe=args.universe, instruments_db=args.instruments_db)
+        engine = ExprEngine(
+            db_path=args.db,
+            table=args.table,
+            universe=args.universe,
+            instruments_db=args.instruments_db,
+        )
         df = engine.compute_sql(args.expr, args.start, args.end)
         print(df.to_string())
     else:

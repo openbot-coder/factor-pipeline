@@ -4,7 +4,6 @@ This module provides common fixtures and configuration for the test suite.
 """
 
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -19,22 +18,20 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 # Pytest Configuration
 # =============================================================================
 
+
 def pytest_configure(config):
     """Configure pytest with custom markers."""
     config.addinivalue_line(
         "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
     )
-    config.addinivalue_line(
-        "markers", "integration: marks tests as integration tests"
-    )
-    config.addinivalue_line(
-        "markers", "requires_data: marks tests that require external data"
-    )
+    config.addinivalue_line("markers", "integration: marks tests as integration tests")
+    config.addinivalue_line("markers", "requires_data: marks tests that require external data")
 
 
 # =============================================================================
 # Data Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def sample_ohlcv():
@@ -47,16 +44,18 @@ def sample_ohlcv():
         price = 100.0
         for d in dates:
             price = price * (1 + np.random.randn() * 0.01)
-            records.append({
-                "date": d,
-                "symbol": symbol,
-                "open": price * 0.99,
-                "high": price * 1.02,
-                "low": price * 0.98,
-                "close": price,
-                "volume": np.random.randint(1e6, 1e8),
-                "amount": price * np.random.randint(1e6, 1e8),
-            })
+            records.append(
+                {
+                    "date": d,
+                    "symbol": symbol,
+                    "open": price * 0.99,
+                    "high": price * 1.02,
+                    "low": price * 0.98,
+                    "close": price,
+                    "volume": np.random.randint(1e6, 1e8),
+                    "amount": price * np.random.randint(1e6, 1e8),
+                }
+            )
     return pd.DataFrame(records)
 
 
@@ -116,6 +115,7 @@ def aligned_factor_ret():
 # Array Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def simple_array():
     """Simple 1D array for testing."""
@@ -152,6 +152,7 @@ def cross_sectional_array():
 # Date/Time Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def trading_dates():
     """List of trading dates (business days)."""
@@ -168,10 +169,12 @@ def sample_dates():
 # Module Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def storage_module():
     """Import and return storage module."""
     from factor_pipeline.data.storage import DuckDBStorage
+
     return DuckDBStorage
 
 
@@ -179,6 +182,7 @@ def storage_module():
 def ops_module():
     """Import and return ops module."""
     from factor_pipeline.factors import ops as ops_module
+
     return ops_module
 
 
@@ -186,6 +190,7 @@ def ops_module():
 def registry_module():
     """Import and return registry module."""
     from factor_pipeline.factors.registry import FactorRegistry
+
     return FactorRegistry
 
 
@@ -193,12 +198,14 @@ def registry_module():
 # Cleanup Fixtures
 # =============================================================================
 
+
 @pytest.fixture(autouse=True)
 def reset_factor_registry():
     """Reset factor registry before each test."""
     from factor_pipeline.factors.registry import FactorRegistry
+
     # Store original state
-    original = FactorRegistry._factors.copy()
+    FactorRegistry._factors.copy()
     yield
     # Restore original state (optional cleanup)
     # FactorRegistry._factors = original
@@ -207,6 +214,7 @@ def reset_factor_registry():
 # =============================================================================
 # Parametrized Fixtures
 # =============================================================================
+
 
 @pytest.fixture(params=[3, 5, 10])
 def quantile_values(request):

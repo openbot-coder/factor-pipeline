@@ -48,9 +48,7 @@ import click
 
 # Import from factor_pipeline package
 from factor_pipeline import __version__
-
 from factor_pipeline.data.storage import DuckDBStorage
-
 
 # =============================================================================
 # Configuration
@@ -63,6 +61,7 @@ VERSION = "0.1.0"
 # =============================================================================
 # Utility Functions
 # =============================================================================
+
 
 def echo_header(text: str) -> None:
     """Print section header."""
@@ -86,7 +85,7 @@ def echo_info(text: str) -> None:
     click.echo(f"ℹ️  {text}")
 
 
-def get_db(db_path: Optional[str] = None) -> DuckDBStorage:
+def get_db(db_path: str | None = None) -> DuckDBStorage:
     """Get database connection."""
     path = db_path or DEFAULT_DB
     if not os.path.exists(path) and path != ":memory:":
@@ -99,6 +98,7 @@ def get_db(db_path: Optional[str] = None) -> DuckDBStorage:
 # =============================================================================
 # Data Commands
 # =============================================================================
+
 
 @click.group(name="data")
 @click.help_option("-h", "--help")
@@ -175,7 +175,7 @@ def data_import(
         df = pd.read_csv(csv_path, nrows=5)
         echo_header(f"Preview: {os.path.basename(csv_path)}")
         click.echo(f"Columns: {', '.join(df.columns.tolist())}")
-        click.echo(f"\nFirst 5 rows:")
+        click.echo("\nFirst 5 rows:")
         click.echo(df.to_string(index=False))
         click.echo()
 
@@ -200,7 +200,7 @@ def data_import(
 @click.option("--limit", default=100, help="Result limit")
 @click.option("--format", "fmt", default="table", type=click.Choice(["table", "csv", "json"]))
 @click.option("--output", "-o", help="Output file path")
-def data_query(sql: str, db: str, limit: int, fmt: str, output: Optional[str]):
+def data_query(sql: str, db: str, limit: int, fmt: str, output: str | None):
     """Execute SQL query."""
     storage = get_db(db)
 
@@ -231,7 +231,7 @@ def data_query(sql: str, db: str, limit: int, fmt: str, output: Optional[str]):
 @data_group.command("stats")
 @click.option("--db", default=DEFAULT_DB, help="Database path")
 @click.option("--table", help="Specific table")
-def data_stats(db: str, table: Optional[str]):
+def data_stats(db: str, table: str | None):
     """Show table statistics."""
     import pandas as pd
 
@@ -243,8 +243,12 @@ def data_stats(db: str, table: Optional[str]):
         df = storage.query(f"SELECT * FROM {t} LIMIT 0")
         for col in df.columns:
             if pd.api.types.is_numeric_dtype(df[col]):
-                stats = storage.query(f"SELECT AVG({col}), STD({col}), MIN({col}), MAX({col}) FROM {t}")
-                click.echo(f"   {col}: avg={stats.iloc[0,0]:.2f}, std={stats.iloc[0,1]:.2f}, min={stats.iloc[0,2]:.2f}, max={stats.iloc[0,3]:.2f}")
+                stats = storage.query(
+                    f"SELECT AVG({col}), STD({col}), MIN({col}), MAX({col}) FROM {t}"
+                )
+                click.echo(
+                    f"   {col}: avg={stats.iloc[0,0]:.2f}, std={stats.iloc[0,1]:.2f}, min={stats.iloc[0,2]:.2f}, max={stats.iloc[0,3]:.2f}"
+                )
 
 
 @data_group.command("tables")
@@ -266,7 +270,7 @@ def data_tables(db: str):
 @click.option("--active/--all", default=False, help="Only active instruments")
 @click.option("--limit", default=50, help="Limit results")
 @click.option("--output", "-o", help="Output file")
-def data_instruments(db: str, market: Optional[str], active: bool, limit: int, output: Optional[str]):
+def data_instruments(db: str, market: str | None, active: bool, limit: int, output: str | None):
     """List instruments (symbols)."""
     storage = get_db(db)
     symbols = storage.get_instruments(market=market)
@@ -281,7 +285,7 @@ def data_instruments(db: str, market: Optional[str], active: bool, limit: int, o
         """).shape[0] > 0]
 
     echo_header(f"Instruments ({len(symbols)} total)")
-    for i, s in enumerate(symbols[:limit]):
+    for _i, s in enumerate(symbols[:limit]):
         click.echo(f"   {s}")
     if len(symbols) > limit:
         click.echo(f"   ... and {len(symbols) - limit} more")
@@ -311,6 +315,7 @@ def data_export(sql: str, db: str, output: str, fmt: str):
 # Factor Commands
 # =============================================================================
 
+
 @click.group(name="factor")
 @click.help_option("-h", "--help")
 def factor_group():
@@ -321,8 +326,9 @@ def factor_group():
 @factor_group.command("list")
 def factor_list():
     """List all available factors."""
-    from factor_pipeline.factors.registry import FactorRegistry
     import importlib
+
+    from factor_pipeline.factors.registry import FactorRegistry
 
     # Load factor modules
     importlib.import_module("factors.gtja191")
@@ -363,7 +369,7 @@ def factor_doc(factor_name: str):
     echo_header(f"Factor: {factor_name}")
     click.echo(f"Expression: {f.expression if hasattr(f, 'expression') else 'N/A'}")
     click.echo(f"Category: {f.category if hasattr(f, 'category') else 'N/A'}")
-    click.echo(f"\nDescription:")
+    click.echo("\nDescription:")
     click.echo(f"   {f.description if f.description else 'No description available'}")
 
 
@@ -374,12 +380,18 @@ def factor_doc(factor_name: str):
 @click.option("--end", help="End date (YYYY-MM-DD)")
 @click.option("--symbols", help="Comma-separated symbols")
 @click.option("--output", "-o", help="Output file")
-def factor_run(expression: str, db: str, start: Optional[str], end: Optional[str],
-                symbols: Optional[str], output: Optional[str]):
+def factor_run(
+    expression: str,
+    db: str,
+    start: str | None,
+    end: str | None,
+    symbols: str | None,
+    output: str | None,
+):
     """Run a factor expression."""
     from factor_pipeline.factors.expr_engine import ExprEngine
 
-    storage = get_db(db)
+    get_db(db)
 
     try:
         engine = ExprEngine(db)
@@ -402,11 +414,11 @@ def factor_run(expression: str, db: str, start: Optional[str], end: Optional[str
 @click.option("--start", help="Start date")
 @click.option("--end", help="End date")
 @click.option("--output", "-o", default="results/", help="Output directory")
-def factor_batch(file_path: str, db: str, start: Optional[str], end: Optional[str], output: str):
+def factor_batch(file_path: str, db: str, start: str | None, end: str | None, output: str):
     """Run multiple factors from a file (one expression per line)."""
     from factor_pipeline.factors.expr_engine import ExprEngine
 
-    storage = get_db(db)
+    get_db(db)
     engine = ExprEngine(db)
 
     # Read expressions
@@ -434,6 +446,7 @@ def factor_batch(file_path: str, db: str, start: Optional[str], end: Optional[st
 # Backtest Commands
 # =============================================================================
 
+
 @click.group(name="backtest")
 @click.help_option("-h", "--help")
 def backtest_group():
@@ -450,6 +463,7 @@ def backtest_group():
 def backtest_run(factors: str, db: str, start: str, end: str, output: str):
     """Run backtest for factors."""
     import pandas as pd
+
     from factor_pipeline.analysis.ic import ICAnalysis
     from factor_pipeline.analysis.layered import LayeredBacktest
 
@@ -457,7 +471,7 @@ def backtest_run(factors: str, db: str, start: str, end: str, output: str):
 
     factor_list = [f.strip() for f in factors.split(",")]
 
-    echo_header(f"Running Backtest")
+    echo_header("Running Backtest")
     click.echo(f"Factors: {', '.join(factor_list)}")
     click.echo(f"Period: {start} to {end}")
     click.echo(f"Output: {output}")
@@ -471,24 +485,25 @@ def backtest_run(factors: str, db: str, start: str, end: str, output: str):
         try:
             # Get factor values
             from factor_pipeline.factors.registry import FactorRegistry
+
             factor = FactorRegistry.get(factor_name)
             if factor:
                 data = storage.get_ohlcv(start_date=start, end_date=end)
                 result = factor.calculate(data)
                 result.to_csv(os.path.join(output, f"{factor_name}_values.csv"))
-                click.echo(f"   ✅ Factor values saved")
+                click.echo("   ✅ Factor values saved")
 
             # IC Analysis
             ic = ICAnalysis()
             ic_result = ic.calculate(result, storage)
             ic_result.to_csv(os.path.join(output, f"{factor_name}_ic.csv"))
-            click.echo(f"   ✅ IC analysis saved")
+            click.echo("   ✅ IC analysis saved")
 
             # Layered Backtest
             lb = LayeredBacktest(n_quantiles=5)
             lb_result = lb.calculate(result, storage)
             lb_result.to_csv(os.path.join(output, f"{factor_name}_layered.csv"))
-            click.echo(f"   ✅ Layered backtest saved")
+            click.echo("   ✅ Layered backtest saved")
 
         except Exception as e:
             echo_error(f"Failed: {e}")
@@ -502,7 +517,7 @@ def backtest_run(factors: str, db: str, start: str, end: str, output: str):
 @click.option("--start", default="2020-01-01", help="Start date")
 @click.option("--end", default="2024-12-31", help="End date")
 @click.option("--output", "-o", help="Output HTML file")
-def backtest_ic(factor: str, db: str, start: str, end: str, output: Optional[str]):
+def backtest_ic(factor: str, db: str, start: str, end: str, output: str | None):
     """Run IC analysis for a factor."""
     from factor_pipeline.analysis.ic import ICAnalysis
 
@@ -513,6 +528,7 @@ def backtest_ic(factor: str, db: str, start: str, end: str, output: Optional[str
     try:
         # Get factor data
         from factor_pipeline.factors.registry import FactorRegistry
+
         factor_obj = FactorRegistry.get(factor)
         if not factor_obj:
             echo_error(f"Factor not found: {factor}")
@@ -525,7 +541,7 @@ def backtest_ic(factor: str, db: str, start: str, end: str, output: Optional[str
         ic = ICAnalysis()
         ic_result = ic.calculate(factor_values, storage)
 
-        click.echo(f"\n📊 IC Statistics:")
+        click.echo("\n📊 IC Statistics:")
         click.echo(f"   Mean IC:     {ic_result['ic'].mean():.4f}")
         click.echo(f"   IC Std:      {ic_result['ic'].std():.4f}")
         click.echo(f"   IR (Mean/Std): {ic_result['ic'].mean() / ic_result['ic'].std():.4f}")
@@ -547,8 +563,9 @@ def backtest_ic(factor: str, db: str, start: str, end: str, output: Optional[str
 @click.option("--end", default="2024-12-31", help="End date")
 @click.option("--n-quintiles", default=5, help="Number of quantiles")
 @click.option("--output", "-o", help="Output HTML file")
-def backtest_layered(factor: str, db: str, start: str, end: str,
-                     n_quintiles: int, output: Optional[str]):
+def backtest_layered(
+    factor: str, db: str, start: str, end: str, n_quintiles: int, output: str | None
+):
     """Run layered backtest for a factor."""
     from factor_pipeline.analysis.layered import LayeredBacktest
 
@@ -558,6 +575,7 @@ def backtest_layered(factor: str, db: str, start: str, end: str,
 
     try:
         from factor_pipeline.factors.registry import FactorRegistry
+
         factor_obj = FactorRegistry.get(factor)
         if not factor_obj:
             echo_error(f"Factor not found: {factor}")
@@ -569,7 +587,7 @@ def backtest_layered(factor: str, db: str, start: str, end: str,
         lb = LayeredBacktest(n_quantiles=n_quintiles)
         result = lb.calculate(factor_values, storage)
 
-        click.echo(f"\n📊 Layered Backtest Results:")
+        click.echo("\n📊 Layered Backtest Results:")
         click.echo(result.to_string())
 
         if output:
@@ -584,6 +602,7 @@ def backtest_layered(factor: str, db: str, start: str, end: str,
 # =============================================================================
 # Report Commands
 # =============================================================================
+
 
 @click.group(name="report")
 @click.help_option("-h", "--help")
@@ -605,7 +624,7 @@ def report_generate(factors: str, db: str, start: str, end: str, output: str):
     storage = get_db(db)
     factor_list = [f.strip() for f in factors.split(",")]
 
-    echo_header(f"Generating Report")
+    echo_header("Generating Report")
     click.echo(f"Factors: {', '.join(factor_list)}")
     click.echo(f"Period: {start} to {end}")
 
@@ -627,6 +646,7 @@ def report_generate(factors: str, db: str, start: str, end: str, output: str):
 # =============================================================================
 # Main CLI Entry Point
 # =============================================================================
+
 
 @click.group()
 @click.version_option(version=VERSION)

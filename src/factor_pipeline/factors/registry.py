@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections import OrderedDict
-from typing import Callable, Optional
-
-from factor_pipeline.factors.base import FactorABC, FactorResult
+from typing import Callable
 
 # ---------------------------------------------------------------------------
 # global registry
@@ -25,12 +23,14 @@ def register_factor(func: Callable = None, *, name: str = None):
         @register_factor(name="my_custom_vwap")
         def some_factor(data): ...
     """
+
     def _decorator(fn: Callable):
         fn_name = name or fn.__name__
         if fn_name in _REGISTRY:
             raise ValueError(f"Duplicate factor name: {fn_name}")
         _REGISTRY[fn_name] = fn
         return fn
+
     if func:
         return _decorator(func)
     return _decorator
@@ -44,7 +44,7 @@ class FactorRegistry:
         return list(_REGISTRY.keys())
 
     @staticmethod
-    def get(name: str) -> Optional[Callable]:
+    def get(name: str) -> Callable | None:
         return _REGISTRY.get(name)
 
     @staticmethod

@@ -40,7 +40,9 @@ class LayeredBacktest:
         )
 
         # Mean return per quantile per date
-        quantile_ret = df.groupby([df.index.get_level_values(0), "quantile"])["ret"].mean().unstack("quantile")
+        quantile_ret = (
+            df.groupby([df.index.get_level_values(0), "quantile"])["ret"].mean().unstack("quantile")
+        )
         quantile_ret.columns = [f"Q{int(c)}" for c in quantile_ret.columns]
 
         # Long-short (Qtop - Qbottom)
@@ -61,20 +63,22 @@ class LayeredBacktest:
             q_data = df[df["quantile"] == q]
             if q_data.empty:
                 continue
+
             def _q_ic(g):
                 try:
                     return g["factor"].corr(g["ret"], method="spearman")
                 except Exception:
                     return np.nan
+
             ic_by_q[f"Q{q}"] = q_data.groupby(level=0).apply(_q_ic)
 
         ic_df = pd.DataFrame(ic_by_q) if ic_by_q else pd.DataFrame()
 
         return {
-            "quantile_returns": quantile_ret,          # daily mean ret per quantile
-            "cumulative_returns": cum,                  # cumulative ret per quantile
-            "long_short": long_short,                   # Qtop - Qbottom
-            "long_short_cum": cum_ls,                   # cumulative long-short
+            "quantile_returns": quantile_ret,  # daily mean ret per quantile
+            "cumulative_returns": cum,  # cumulative ret per quantile
+            "long_short": long_short,  # Qtop - Qbottom
+            "long_short_cum": cum_ls,  # cumulative long-short
             "top_mean": quantile_ret[top_col].mean() if top_col in quantile_ret.columns else 0,
             "bottom_mean": quantile_ret[bot_col].mean() if bot_col in quantile_ret.columns else 0,
             "spread_mean": long_short.mean(),

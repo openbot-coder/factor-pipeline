@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from factor_pipeline.factors.base import FactorABC, FactorResult
-from factor_pipeline.factors.registry import register_factor
 
+from factor_pipeline.factors.registry import register_factor
 
 # ---------------------------------------------------------------------------
 # helpers shared by multiple factors
 # ---------------------------------------------------------------------------
+
 
 def _ensure_mi(values: pd.DataFrame) -> pd.Series:
     """Ensure MultiIndex (date, stock) Series named 'factor'."""
@@ -36,6 +36,7 @@ def _returns(close: pd.Series) -> pd.Series:
 # ---------------------------------------------------------------------------
 # Alpha 001
 # ---------------------------------------------------------------------------
+
 
 @register_factor
 def alpha001(data: dict) -> pd.Series:
@@ -64,6 +65,7 @@ def alpha001(data: dict) -> pd.Series:
 # Alpha 002
 # ---------------------------------------------------------------------------
 
+
 @register_factor
 def alpha002(data: dict) -> pd.Series:
     # -1 * delta(((close - low) - (high - close)) / (high - low), 1)
@@ -79,6 +81,7 @@ def alpha002(data: dict) -> pd.Series:
 # Alpha 003
 # ---------------------------------------------------------------------------
 
+
 @register_factor
 def alpha003(data: dict) -> pd.Series:
     # -1 * SUM((CLOSE = DELAY(CLOSE, 1) ? 0 :
@@ -89,7 +92,9 @@ def alpha003(data: dict) -> pd.Series:
     h = data["high"].iloc[:, 0]
     prev_c = c.groupby(level=1).shift(1)
     cond = c > prev_c
-    term = pd.Series(np.where(cond, c - np.minimum(l, prev_c), c - np.maximum(h, prev_c)), index=c.index)
+    term = pd.Series(
+        np.where(cond, c - np.minimum(l, prev_c), c - np.maximum(h, prev_c)), index=c.index
+    )
     term = term.where(c != prev_c, 0)
     s = term.groupby(level=1).rolling(6, min_periods=6).sum().droplevel(0)
     return _ensure_mi((-s).to_frame("factor"))
@@ -98,6 +103,7 @@ def alpha003(data: dict) -> pd.Series:
 # ---------------------------------------------------------------------------
 # Alpha 004
 # ---------------------------------------------------------------------------
+
 
 @register_factor
 def alpha004(data: dict) -> pd.Series:
@@ -113,13 +119,16 @@ def alpha004(data: dict) -> pd.Series:
     cond1 = (s8 + sd8) < s2
     cond2 = s2 < (s8 - sd8)
     vol_cond = (v / mv20) >= 1
-    result = pd.Series(np.where(cond1, -1, np.where(cond2, 1, np.where(vol_cond, 1, -1))), index=c.index)
+    result = pd.Series(
+        np.where(cond1, -1, np.where(cond2, 1, np.where(vol_cond, 1, -1))), index=c.index
+    )
     return _ensure_mi(result.to_frame("factor"))
 
 
 # ---------------------------------------------------------------------------
 # Alpha 005
 # ---------------------------------------------------------------------------
+
 
 @register_factor
 def alpha005(data: dict) -> pd.Series:
@@ -132,9 +141,24 @@ def alpha005(data: dict) -> pd.Series:
             return np.nan
         return (x < x.iloc[-1]).sum() / n
 
-    trk_v = v.groupby(level=1).rolling(5, min_periods=5).apply(lambda x: _tsrank(x, 5), raw=False).droplevel(0)
-    trk_h = h.groupby(level=1).rolling(5, min_periods=5).apply(lambda x: _tsrank(x, 5), raw=False).droplevel(0)
-    corr = trk_v.groupby(level=1).rolling(5, min_periods=5).corr(trk_h.groupby(level=1).shift(0)).droplevel(0)
+    trk_v = (
+        v.groupby(level=1)
+        .rolling(5, min_periods=5)
+        .apply(lambda x: _tsrank(x, 5), raw=False)
+        .droplevel(0)
+    )
+    trk_h = (
+        h.groupby(level=1)
+        .rolling(5, min_periods=5)
+        .apply(lambda x: _tsrank(x, 5), raw=False)
+        .droplevel(0)
+    )
+    corr = (
+        trk_v.groupby(level=1)
+        .rolling(5, min_periods=5)
+        .corr(trk_h.groupby(level=1).shift(0))
+        .droplevel(0)
+    )
     tsmax = corr.groupby(level=1).rolling(3, min_periods=3).max().droplevel(0)
     return _ensure_mi((-tsmax).to_frame("factor"))
 
@@ -142,6 +166,7 @@ def alpha005(data: dict) -> pd.Series:
 # ---------------------------------------------------------------------------
 # Alpha 006
 # ---------------------------------------------------------------------------
+
 
 @register_factor
 def alpha006(data: dict) -> pd.Series:
@@ -157,6 +182,7 @@ def alpha006(data: dict) -> pd.Series:
 # ---------------------------------------------------------------------------
 # Alpha 007
 # ---------------------------------------------------------------------------
+
 
 @register_factor
 def alpha007(data: dict) -> pd.Series:
@@ -178,6 +204,7 @@ def alpha007(data: dict) -> pd.Series:
 # Alpha 008
 # ---------------------------------------------------------------------------
 
+
 @register_factor
 def alpha008(data: dict) -> pd.Series:
     # -1 * RANK(DELTA((HIGH + LOW) / 10 + VWAP * 0.8, 4))
@@ -196,6 +223,7 @@ def alpha008(data: dict) -> pd.Series:
 # Alpha 009
 # ---------------------------------------------------------------------------
 
+
 @register_factor
 def alpha009(data: dict) -> pd.Series:
     # SMA(((HIGH + LOW) / 2 - (DELAY(HIGH, 1) + DELAY(LOW, 1)) / 2) * (HIGH - LOW) / VOLUME, 7, 2)
@@ -213,6 +241,7 @@ def alpha009(data: dict) -> pd.Series:
 # Alpha 010
 # ---------------------------------------------------------------------------
 
+
 @register_factor
 def alpha010(data: dict) -> pd.Series:
     # RANK(MAX(((RET < 0) ? STD(RET, 20) : CLOSE)^2, 5))
@@ -220,11 +249,13 @@ def alpha010(data: dict) -> pd.Series:
     ret = c.groupby(level=1).pct_change()
     std20 = ret.groupby(level=1).rolling(20, min_periods=20).std().droplevel(0)
     cond_val = pd.Series(np.where(ret < 0, std20, c), index=ret.index)
-    squared = cond_val ** 2
+    squared = cond_val**2
+
     def _max5(x):
         if len(x) < 5:
             return np.nan
         return x.iloc[-5:].max()
+
     mx = squared.groupby(level=1).rolling(5, min_periods=5).apply(_max5, raw=False).droplevel(0)
     rank = mx.groupby(level=0).rank(pct=True)
     return _ensure_mi(rank.to_frame("factor"))
@@ -233,6 +264,7 @@ def alpha010(data: dict) -> pd.Series:
 # ---------------------------------------------------------------------------
 # Alpha 011
 # ---------------------------------------------------------------------------
+
 
 @register_factor
 def alpha011(data: dict) -> pd.Series:
@@ -249,6 +281,7 @@ def alpha011(data: dict) -> pd.Series:
 # ---------------------------------------------------------------------------
 # Alpha 012
 # ---------------------------------------------------------------------------
+
 
 @register_factor
 def alpha012(data: dict) -> pd.Series:
@@ -269,6 +302,7 @@ def alpha012(data: dict) -> pd.Series:
 # Alpha 013
 # ---------------------------------------------------------------------------
 
+
 @register_factor
 def alpha013(data: dict) -> pd.Series:
     # ((HIGH * LOW)^0.5) - VWAP
@@ -286,6 +320,7 @@ def alpha013(data: dict) -> pd.Series:
 # Alpha 014
 # ---------------------------------------------------------------------------
 
+
 @register_factor
 def alpha014(data: dict) -> pd.Series:
     # CLOSE - DELAY(CLOSE, 5) = 5日动量
@@ -296,6 +331,7 @@ def alpha014(data: dict) -> pd.Series:
 # ---------------------------------------------------------------------------
 # Alpha 015
 # ---------------------------------------------------------------------------
+
 
 @register_factor
 def alpha015(data: dict) -> pd.Series:
@@ -309,6 +345,7 @@ def alpha015(data: dict) -> pd.Series:
 # Alpha 016
 # ---------------------------------------------------------------------------
 
+
 @register_factor
 def alpha016(data: dict) -> pd.Series:
     # -1 * TSMAX(RANK(CORR(RANK(VOLUME), RANK(VWAP), 5)), 5)
@@ -318,7 +355,12 @@ def alpha016(data: dict) -> pd.Series:
     vwap = amt / v
     rk_v = v.groupby(level=0).rank(pct=True)
     rk_vwap = vwap.groupby(level=0).rank(pct=True)
-    corr = rk_v.groupby(level=1).rolling(5, min_periods=5).corr(rk_vwap.groupby(level=1).shift(0)).droplevel(0)
+    corr = (
+        rk_v.groupby(level=1)
+        .rolling(5, min_periods=5)
+        .corr(rk_vwap.groupby(level=1).shift(0))
+        .droplevel(0)
+    )
     rank_corr = corr.groupby(level=0).rank(pct=True)
     tsmax = rank_corr.groupby(level=1).rolling(5, min_periods=5).max().droplevel(0)
     return _ensure_mi((-tsmax).to_frame("factor"))
@@ -327,6 +369,7 @@ def alpha016(data: dict) -> pd.Series:
 # ---------------------------------------------------------------------------
 # Alpha 017
 # ---------------------------------------------------------------------------
+
 
 @register_factor
 def alpha017(data: dict) -> pd.Series:
@@ -338,13 +381,14 @@ def alpha017(data: dict) -> pd.Series:
     diff = vwap - vwap.clip(lower=15)
     rank = diff.groupby(level=0).rank(pct=True)
     delta_c = c.groupby(level=1).diff(5)
-    result = rank ** delta_c
+    result = rank**delta_c
     return _ensure_mi(result.to_frame("factor"))
 
 
 # ---------------------------------------------------------------------------
 # Alpha 018 — REVS5
 # ---------------------------------------------------------------------------
+
 
 @register_factor
 def alpha018(data: dict) -> pd.Series:
@@ -357,19 +401,22 @@ def alpha018(data: dict) -> pd.Series:
 # Alpha 019
 # ---------------------------------------------------------------------------
 
+
 @register_factor
 def alpha019(data: dict) -> pd.Series:
     # C<DELAY(C,5) ? (C/DELAY(C,5)-1) : (C==DELAY(C,5) ? 0 : (1-DELAY(C,5)/C))
     c = data["close"].iloc[:, 0]
     prev = c.groupby(level=1).shift(5)
-    result = pd.Series(np.where(c < prev, c / prev - 1,
-                                  np.where(c == prev, 0, 1 - prev / c)), index=c.index)
+    result = pd.Series(
+        np.where(c < prev, c / prev - 1, np.where(c == prev, 0, 1 - prev / c)), index=c.index
+    )
     return _ensure_mi(result.to_frame("factor"))
 
 
 # ---------------------------------------------------------------------------
 # Alpha 020
 # ---------------------------------------------------------------------------
+
 
 @register_factor
 def alpha020(data: dict) -> pd.Series:
@@ -382,11 +429,12 @@ def alpha020(data: dict) -> pd.Series:
 # Alpha 021
 # ---------------------------------------------------------------------------
 
+
 @register_factor
 def alpha021(data: dict) -> pd.Series:
     # REGBETA(MEAN(CLOSE, 6), SEQUENCE(6))
     c = data["close"].iloc[:, 0]
-    seq = pd.Series(np.arange(1, 7), index=c.index)
+    pd.Series(np.arange(1, 7), index=c.index)
 
     def _regbeta(x, n=6):
         if len(x) < n:
@@ -394,14 +442,18 @@ def alpha021(data: dict) -> pd.Series:
         cov = np.cov(x[-n:], np.arange(1, n + 1))[0, 1]
         var = np.var(np.arange(1, n + 1))
         return cov / var if var != 0 else 0.0
+
     mean6 = c.groupby(level=1).rolling(6, min_periods=6).mean().droplevel(0)
-    result = mean6.groupby(level=1).rolling(6, min_periods=6).apply(_regbeta, raw=False).droplevel(0)
+    result = (
+        mean6.groupby(level=1).rolling(6, min_periods=6).apply(_regbeta, raw=False).droplevel(0)
+    )
     return _ensure_mi(result.to_frame("factor"))
 
 
 # ---------------------------------------------------------------------------
 # Alpha 022
 # ---------------------------------------------------------------------------
+
 
 @register_factor
 def alpha022(data: dict) -> pd.Series:
@@ -418,14 +470,15 @@ def alpha022(data: dict) -> pd.Series:
 # Alpha 023
 # ---------------------------------------------------------------------------
 
+
 @register_factor
 def alpha023(data: dict) -> pd.Series:
     # SMA((CLOSE>DELAY(CLOSE,1)?STD(CLOSE,20):0),20,1) /
     # (SMA((CLOSE>DELAY(CLOSE,1)?STD(CLOSE,20):0),20,1)+SMA((CLOSE<=DELAY(CLOSE,1)?STD(CLOSE,20):0),20,1))*100
     c = data["close"].iloc[:, 0]
     prev = c.groupby(level=1).shift(1)
-    up = np.where(c > prev, c, 0)
-    dn = np.where(c <= prev, c, 0)
+    np.where(c > prev, c, 0)
+    np.where(c <= prev, c, 0)
     # We use rolling std of returns scaled by price
     ret = c.groupby(level=1).pct_change()
     std20 = ret.groupby(level=1).rolling(20, min_periods=20).std().droplevel(0) * c
@@ -441,6 +494,7 @@ def alpha023(data: dict) -> pd.Series:
 # Alpha 024
 # ---------------------------------------------------------------------------
 
+
 @register_factor
 def alpha024(data: dict) -> pd.Series:
     # SMA(CLOSE - DELAY(CLOSE, 5), 5, 1)
@@ -454,6 +508,7 @@ def alpha024(data: dict) -> pd.Series:
 # Alpha 025
 # ---------------------------------------------------------------------------
 
+
 @register_factor
 def alpha025(data: dict) -> pd.Series:
     # (-1 * RANK(DELTA(CLOSE, 7) * (1 - RANK(DECAYLINEAR(VOLUME / MEAN(VOLUME, 20), 9)))))
@@ -464,10 +519,22 @@ def alpha025(data: dict) -> pd.Series:
     mv20 = v.groupby(level=1).rolling(20, min_periods=20).mean().droplevel(0)
     vol_ratio = v / (mv20 + 1)
     w = np.arange(1, 10) / np.arange(1, 10).sum()
-    dl = vol_ratio.groupby(level=1).rolling(9, min_periods=9).apply(lambda x: (x * w[: len(x)]).sum(), raw=False).droplevel(0)
+    dl = (
+        vol_ratio.groupby(level=1)
+        .rolling(9, min_periods=9)
+        .apply(lambda x: (x * w[: len(x)]).sum(), raw=False)
+        .droplevel(0)
+    )
     rank1 = delta_c.groupby(level=0).rank(pct=True)
     rank2 = (1 - dl).groupby(level=0).rank(pct=True)
-    ret250 = c.groupby(level=1).pct_change().groupby(level=1).rolling(250, min_periods=250).sum().droplevel(0)
+    ret250 = (
+        c.groupby(level=1)
+        .pct_change()
+        .groupby(level=1)
+        .rolling(250, min_periods=250)
+        .sum()
+        .droplevel(0)
+    )
     term2 = 1 + ret250.groupby(level=0).rank(pct=True)
     result = -rank1 * rank2 * term2
     return _ensure_mi(result.to_frame("factor"))
@@ -477,6 +544,7 @@ def alpha025(data: dict) -> pd.Series:
 # Alpha 026
 # ---------------------------------------------------------------------------
 
+
 @register_factor
 def alpha026(data: dict) -> pd.Series:
     # SUM(CLOSE, 7) / 7 - CLOSE + CORR(VWAP, DELAY(CLOSE, 5), 230)
@@ -485,7 +553,12 @@ def alpha026(data: dict) -> pd.Series:
     amt = data.get("amount", pd.DataFrame()).iloc[:, 0] if "amount" in data else c * v
     vwap = amt / v
     s7 = c.groupby(level=1).rolling(7, min_periods=7).sum().droplevel(0) / 7
-    corr = vwap.groupby(level=1).rolling(230, min_periods=230).corr(c.groupby(level=1).shift(5)).droplevel(0)
+    corr = (
+        vwap.groupby(level=1)
+        .rolling(230, min_periods=230)
+        .corr(c.groupby(level=1).shift(5))
+        .droplevel(0)
+    )
     result = s7 - c + corr
     return _ensure_mi(result.to_frame("factor"))
 
@@ -493,6 +566,7 @@ def alpha026(data: dict) -> pd.Series:
 # ---------------------------------------------------------------------------
 # Alpha 027
 # ---------------------------------------------------------------------------
+
 
 @register_factor
 def alpha027(data: dict) -> pd.Series:
@@ -502,7 +576,12 @@ def alpha027(data: dict) -> pd.Series:
     d6 = c / c.groupby(level=1).shift(6) - 1
     term = (d3 + d6) * 100
     w = np.arange(1, 13) / np.arange(1, 13).sum()
-    result = term.groupby(level=1).rolling(12, min_periods=12).apply(lambda x: (x * w[: len(x)]).sum(), raw=False).droplevel(0)
+    result = (
+        term.groupby(level=1)
+        .rolling(12, min_periods=12)
+        .apply(lambda x: (x * w[: len(x)]).sum(), raw=False)
+        .droplevel(0)
+    )
     return _ensure_mi(result.to_frame("factor"))
 
 
@@ -510,14 +589,19 @@ def alpha027(data: dict) -> pd.Series:
 # Alpha 028 — KDJ_J (external dependency)
 # ---------------------------------------------------------------------------
 
+
 @register_factor
 def alpha028(data: dict) -> pd.Series:
     # 3 * SMA((CLOSE - TSMIN(LOW, 9)) / (TSMAX(HIGH, 9) - TSMIN(LOW, 9) + 1e-9) * 100, 3, 1)
     c = data["close"].iloc[:, 0]
     h = data["high"].iloc[:, 0]
     l = data["low"].iloc[:, 0]
-    tsmax9 = l.groupby(level=1).shift(0).groupby(level=1).rolling(9, min_periods=9).max().droplevel(0)
-    tsmin9 = h.groupby(level=1).shift(0).groupby(level=1).rolling(9, min_periods=9).min().droplevel(0)
+    tsmax9 = (
+        l.groupby(level=1).shift(0).groupby(level=1).rolling(9, min_periods=9).max().droplevel(0)
+    )
+    tsmin9 = (
+        h.groupby(level=1).shift(0).groupby(level=1).rolling(9, min_periods=9).min().droplevel(0)
+    )
     # Actually use proper data
     tsmin9 = c.groupby(level=1).rolling(9, min_periods=9).min().droplevel(0)
     tsmax9 = c.groupby(level=1).rolling(9, min_periods=9).max().droplevel(0)
@@ -557,6 +641,7 @@ def _make_stub_factor(n: int, formula: str):
     def _stub(data: dict) -> pd.Series:
         c = data["close"].iloc[:, 0]
         return pd.Series(np.nan, index=c.index, name="factor")
+
     _stub.__doc__ = f"Alpha{n:03d}: {formula}"
     _stub.__name__ = name
     globals()[name] = _stub

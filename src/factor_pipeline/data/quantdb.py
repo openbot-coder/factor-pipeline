@@ -10,19 +10,18 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 import duckdb
 import pandas as pd
 
-
 # =============================================================================
 # Constants
 # =============================================================================
+
 
 class Market(Enum):
     SSE = "SSE"
@@ -35,12 +34,12 @@ class IndexCode(Enum):
     CSI300 = ("000300", "SH", "沪深300")
     CSI500 = ("000905", "SH", "中证500")
     CSI1000 = ("000852", "SH", "中证1000")
-    
+
     def __init__(self, code: str, exchange: str, name_zh: str):
         self.code = code
         self.exchange = exchange
         self.name_zh = name_zh
-    
+
     @property
     def full_code(self) -> str:
         return f"{self.code}.{self.exchange}"
@@ -81,7 +80,10 @@ DATA_DICTIONARY = {
             "list_date": {"type": "DATE", "description": "上市日期"},
             "delist_date": {"type": "DATE", "description": "退市日期 (NULL表示仍在交易)"},
             "market": {"type": "VARCHAR", "description": "所属市场 (SSE/SZSE/BSE)"},
-            "board_type": {"type": "VARCHAR", "description": "板块类型 (主板/创业板/科创板/北交所)"},
+            "board_type": {
+                "type": "VARCHAR",
+                "description": "板块类型 (主板/创业板/科创板/北交所)",
+            },
             "industry_sw_l1": {"type": "VARCHAR", "description": "申万一级行业"},
             "status": {"type": "VARCHAR", "description": "状态 (ACTIVE/DELISTED)"},
             "updated_at": {"type": "TIMESTAMP", "description": "更新时间"},
@@ -203,7 +205,10 @@ DATA_DICTIONARY = {
         "fields": {
             "id": {"type": "INTEGER", "description": "主键ID"},
             "name": {"type": "VARCHAR", "description": "因子名称"},
-            "category": {"type": "VARCHAR", "description": "因子类别 (technical/fundamental/alpha)"},
+            "category": {
+                "type": "VARCHAR",
+                "description": "因子类别 (technical/fundamental/alpha)",
+            },
             "description": {"type": "TEXT", "description": "因子描述"},
             "expression": {"type": "TEXT", "description": "计算表达式"},
             "parameters": {"type": "JSON", "description": "参数字典"},
@@ -251,6 +256,7 @@ DATA_DICTIONARY = {
 # =============================================================================
 # Schema
 # =============================================================================
+
 
 def get_ods_schema(source: str) -> str:
     return f"""
@@ -390,6 +396,7 @@ CREATE TABLE IF NOT EXISTS meta_ods_tables (
 # Validation Rules
 # =============================================================================
 
+
 @dataclass
 class ValidationRule:
     name: str
@@ -403,16 +410,52 @@ class ValidationRule:
 
 
 VALIDATION_RULES = [
-    ValidationRule("dwd_calendar_weekend", "DWD", "dwd_calendars", "is_trading_day", "consistency",
-                   "SELECT COUNT(*) FROM dwd_calendars WHERE is_trading_day = TRUE AND day_of_week >= 5", "count = 0"),
-    ValidationRule("dwd_instruments_list_date", "DWD", "dwd_instruments", "list_date", "accuracy",
-                   "SELECT COUNT(*) FROM dwd_instruments WHERE list_date > CURRENT_DATE OR list_date < '1990-01-01'", "count = 0"),
-    ValidationRule("dwd_ohlcv_price_consistency", "DWD", "dwd_daily_ohlcv", "high/low/close", "consistency",
-                   "SELECT COUNT(*) FROM dwd_daily_ohlcv WHERE high < low OR high < close OR low > open", "count = 0"),
-    ValidationRule("dwd_ohlcv_volume_positive", "DWD", "dwd_daily_ohlcv", "volume", "accuracy",
-                   "SELECT COUNT(*) FROM dwd_daily_ohlcv WHERE volume < 0 OR amount < 0", "count = 0"),
-    ValidationRule("dwd_ohlcv_timeliness", "DWD", "dwd_daily_ohlcv", "date", "timeliness",
-                   "SELECT MAX(date) FROM dwd_daily_ohlcv", "max_date >= TODAY - 1", "WARNING"),
+    ValidationRule(
+        "dwd_calendar_weekend",
+        "DWD",
+        "dwd_calendars",
+        "is_trading_day",
+        "consistency",
+        "SELECT COUNT(*) FROM dwd_calendars WHERE is_trading_day = TRUE AND day_of_week >= 5",
+        "count = 0",
+    ),
+    ValidationRule(
+        "dwd_instruments_list_date",
+        "DWD",
+        "dwd_instruments",
+        "list_date",
+        "accuracy",
+        "SELECT COUNT(*) FROM dwd_instruments WHERE list_date > CURRENT_DATE OR list_date < '1990-01-01'",
+        "count = 0",
+    ),
+    ValidationRule(
+        "dwd_ohlcv_price_consistency",
+        "DWD",
+        "dwd_daily_ohlcv",
+        "high/low/close",
+        "consistency",
+        "SELECT COUNT(*) FROM dwd_daily_ohlcv WHERE high < low OR high < close OR low > open",
+        "count = 0",
+    ),
+    ValidationRule(
+        "dwd_ohlcv_volume_positive",
+        "DWD",
+        "dwd_daily_ohlcv",
+        "volume",
+        "accuracy",
+        "SELECT COUNT(*) FROM dwd_daily_ohlcv WHERE volume < 0 OR amount < 0",
+        "count = 0",
+    ),
+    ValidationRule(
+        "dwd_ohlcv_timeliness",
+        "DWD",
+        "dwd_daily_ohlcv",
+        "date",
+        "timeliness",
+        "SELECT MAX(date) FROM dwd_daily_ohlcv",
+        "max_date >= TODAY - 1",
+        "WARNING",
+    ),
 ]
 
 
@@ -422,27 +465,28 @@ class ValidationResult:
     passed: bool
     expected: str
     actual: str
-    details: Optional[dict] = None
+    details: dict | None = None
 
 
 @dataclass
 class UpdateResult:
     """更新结果"""
+
     layer: str
     table: str
     source: str
     records: int
     status: str
     start_time: datetime
-    end_time: Optional[datetime] = None
-    error: Optional[str] = None
-    
+    end_time: datetime | None = None
+    error: str | None = None
+
     @property
     def duration_seconds(self) -> float:
         if self.end_time:
             return (self.end_time - self.start_time).total_seconds()
         return 0.0
-    
+
     @property
     def is_success(self) -> bool:
         return self.status == "SUCCESS"
@@ -452,37 +496,40 @@ class UpdateResult:
 # QuantDB Class
 # =============================================================================
 
+
 class QuantDB:
     """量化数据库管理器 (3层架构 + ETL分离)"""
-    
-    def __init__(self, db_path: str = ":memory:", read_only: bool = False, config: Optional[dict] = None):
+
+    def __init__(
+        self, db_path: str = ":memory:", read_only: bool = False, config: dict | None = None
+    ):
         self.db_path = db_path
         self.read_only = read_only
         self.config = config or {}
-        self._conn: Optional[duckdb.DuckDBPyConnection] = None
-        
+        self._conn: duckdb.DuckDBPyConnection | None = None
+
         # 连接并初始化 (包括 :memory: 数据库)
         self.connect()
         if not read_only:
             self.init_schema()
-    
+
     def connect(self) -> duckdb.DuckDBPyConnection:
         if self._conn is None:
             self._conn = duckdb.connect(self.db_path, read_only=self.read_only, config=self.config)
         return self._conn
-    
+
     def close(self) -> None:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
-    
-    def __enter__(self) -> "QuantDB":
+
+    def __enter__(self) -> QuantDB:
         self.connect()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
-    
+
     def init_schema(self) -> None:
         conn = self.connect()
         conn.execute(SCHEMA_DWD)
@@ -490,8 +537,8 @@ class QuantDB:
         conn.execute(SCHEMA_META)
         conn.commit()
         print(f"✅ 数据库Schema初始化完成: {self.db_path}")
-    
-    def execute(self, sql: str, params: Optional[dict] = None) -> duckdb.DuckDBPyConnection:
+
+    def execute(self, sql: str, params: dict | None = None) -> duckdb.DuckDBPyConnection:
         conn = self.connect()
         if params:
             conn.execute(sql, params)
@@ -499,56 +546,65 @@ class QuantDB:
             conn.execute(sql)
         conn.commit()
         return conn
-    
-    def query(self, sql: str, params: Optional[dict] = None) -> pd.DataFrame:
+
+    def query(self, sql: str, params: dict | None = None) -> pd.DataFrame:
         conn = self.connect()
         if params:
             return conn.execute(sql, params).fetchdf()
         return conn.execute(sql).fetchdf()
-    
+
     # -------------------------------------------------------------------------
     # Table Params - 参数表
     # -------------------------------------------------------------------------
-    
+
     def update_table_params(
-        self, layer: str, table_name: str, records: int, source: str = "",
-        status: str = "OK", error_message: str = None
+        self,
+        layer: str,
+        table_name: str,
+        records: int,
+        source: str = "",
+        status: str = "OK",
+        error_message: str = None,
     ) -> None:
         """更新表参数 (最后更新时间)"""
-        error_val = 'NULL' if not error_message else f"'{error_message}'"
+        error_val = "NULL" if not error_message else f"'{error_message}'"
         now = datetime.now()
-        
+
         # 先删除后插入（避免 ON CONFLICT 语法兼容问题）
-        self.execute(f"DELETE FROM meta_table_params WHERE layer = '{layer}' AND table_name = '{table_name}' AND source = '{source}'")
+        self.execute(
+            f"DELETE FROM meta_table_params WHERE layer = '{layer}' AND table_name = '{table_name}' AND source = '{source}'"
+        )
         self.execute(f"""
-            INSERT INTO meta_table_params 
+            INSERT INTO meta_table_params
             (layer, table_name, source, last_update_time, last_update_records, status, error_message, created_at, updated_at)
             VALUES ('{layer}', '{table_name}', '{source}', '{now}', {records}, '{status}', {error_val}, '{now}', '{now}')
         """)
-    
-    def get_table_params(self, layer: Optional[str] = None, table_name: Optional[str] = None) -> pd.DataFrame:
+
+    def get_table_params(
+        self, layer: str | None = None, table_name: str | None = None
+    ) -> pd.DataFrame:
         """获取表参数"""
         conditions = []
         if layer:
             conditions.append(f"layer = '{layer}'")
         if table_name:
             conditions.append(f"table_name = '{table_name}'")
-        
+
         where = " AND ".join(conditions) if conditions else "1=1"
         sql = f"""
-            SELECT layer, table_name, source, last_update_time, 
+            SELECT layer, table_name, source, last_update_time,
                    last_update_records, status, error_message
             FROM meta_table_params
             WHERE {where}
             ORDER BY layer, table_name
         """
         return self.query(sql)
-    
+
     def get_all_table_status(self) -> pd.DataFrame:
         """获取所有表状态"""
         sql = """
             SELECT layer, table_name, source, last_update_time, last_update_records, status,
-                   CASE 
+                   CASE
                        WHEN last_update_time >= CURRENT_TIMESTAMP - INTERVAL '1 day' THEN 'fresh'
                        WHEN last_update_time >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 'stale'
                        ELSE 'outdated'
@@ -557,97 +613,154 @@ class QuantDB:
             ORDER BY layer, table_name
         """
         return self.query(sql)
-    
+
     # -------------------------------------------------------------------------
     # Data Source
     # -------------------------------------------------------------------------
-    
-    def register_source(self, source: str, source_type: str = "api", priority: int = 1, config: dict = None) -> None:
+
+    def register_source(
+        self, source: str, source_type: str = "api", priority: int = 1, config: dict = None
+    ) -> None:
         config_json = json.dumps(config or {})
         # 先删除旧记录
         self.execute(f"DELETE FROM meta_data_sources WHERE source_name = '{source}'")
         # 计算新ID
-        max_id = self.query("SELECT COALESCE(MAX(id), 0) as max_id FROM meta_data_sources").iloc[0, 0]
+        max_id = self.query("SELECT COALESCE(MAX(id), 0) as max_id FROM meta_data_sources").iloc[
+            0, 0
+        ]
         new_id = int(max_id) + 1
         self.execute(f"""
-            INSERT INTO meta_data_sources 
+            INSERT INTO meta_data_sources
             (id, source_name, source_type, priority, config, enabled)
             VALUES ({new_id}, '{source}', '{source_type}', {priority}, '{config_json}', TRUE)
         """)
-    
+
     def get_active_sources(self) -> list[str]:
-        df = self.query("SELECT source_name FROM meta_data_sources WHERE enabled = TRUE ORDER BY priority ASC")
+        df = self.query(
+            "SELECT source_name FROM meta_data_sources WHERE enabled = TRUE ORDER BY priority ASC"
+        )
         return df["source_name"].tolist()
-    
-    def get_primary_source(self) -> Optional[str]:
-        df = self.query("SELECT source_name FROM meta_data_sources WHERE enabled = TRUE ORDER BY priority ASC LIMIT 1")
+
+    def get_primary_source(self) -> str | None:
+        df = self.query(
+            "SELECT source_name FROM meta_data_sources WHERE enabled = TRUE ORDER BY priority ASC LIMIT 1"
+        )
         return df.iloc[0]["source_name"] if not df.empty else None
-    
+
     # -------------------------------------------------------------------------
     # ODS Layer
     # -------------------------------------------------------------------------
-    
+
     def create_ods_tables(self, source: str) -> None:
         self.execute(get_ods_schema(source))
         for table_type in ["calendars", "instruments", "index_components", "daily_ohlcv"]:
             table_name = f"ods_{table_type}_{source}"
             # 先删除后插入
-            self.execute(f"DELETE FROM meta_ods_tables WHERE source = '{source}' AND table_type = '{table_type}'")
+            self.execute(
+                f"DELETE FROM meta_ods_tables WHERE source = '{source}' AND table_type = '{table_type}'"
+            )
             # 计算新ID
-            max_id = self.query("SELECT COALESCE(MAX(id), 0) as max_id FROM meta_ods_tables").iloc[0, 0]
+            max_id = self.query("SELECT COALESCE(MAX(id), 0) as max_id FROM meta_ods_tables").iloc[
+                0, 0
+            ]
             new_id = int(max_id) + 1
-            self.execute(f"INSERT INTO meta_ods_tables (id, source, table_type, table_name) VALUES ({new_id}, '{source}', '{table_type}', '{table_name}')")
-    
+            self.execute(
+                f"INSERT INTO meta_ods_tables (id, source, table_type, table_name) VALUES ({new_id}, '{source}', '{table_type}', '{table_name}')"
+            )
+
     def import_ods(self, source: str, table_type: str, df: pd.DataFrame) -> int:
         table_name = f"ods_{table_type}_{source}"
-        
+
         if table_type not in self.list_ods_tables(source):
             self.create_ods_tables(source)
-        
+
         df = df.copy()
         df["source"] = source
         if "fetched_at" not in df.columns:
             df["fetched_at"] = datetime.now()
-        
+
         conn = self.connect()
         records = []
-        
+
         for _, row in df.iterrows():
             if table_type == "calendars":
-                records.append([row["date"], row["exchange"], row["is_trading_day"], source, row["fetched_at"]])
+                records.append(
+                    [row["date"], row["exchange"], row["is_trading_day"], source, row["fetched_at"]]
+                )
             elif table_type == "instruments":
-                records.append([row["symbol"], row["name"], row.get("list_date"), row.get("delist_date"), row["market"], source, row["fetched_at"]])
+                records.append(
+                    [
+                        row["symbol"],
+                        row["name"],
+                        row.get("list_date"),
+                        row.get("delist_date"),
+                        row["market"],
+                        source,
+                        row["fetched_at"],
+                    ]
+                )
             elif table_type == "index_components":
-                records.append([row["index_code"], row.get("index_name"), row["symbol"], row.get("in_date"), row.get("out_date"), row.get("weight", 0), source, row["fetched_at"]])
+                records.append(
+                    [
+                        row["index_code"],
+                        row.get("index_name"),
+                        row["symbol"],
+                        row.get("in_date"),
+                        row.get("out_date"),
+                        row.get("weight", 0),
+                        source,
+                        row["fetched_at"],
+                    ]
+                )
             elif table_type == "daily_ohlcv":
-                records.append([row["date"], row["symbol"], row.get("open", 0), row.get("high", 0), row.get("low", 0), row.get("close", 0), row.get("volume", 0), row.get("amount", 0), row.get("turnover_rate", 0), row.get("pct_change", 0), row.get("adjust_flag", "2"), source, row["fetched_at"]])
-        
+                records.append(
+                    [
+                        row["date"],
+                        row["symbol"],
+                        row.get("open", 0),
+                        row.get("high", 0),
+                        row.get("low", 0),
+                        row.get("close", 0),
+                        row.get("volume", 0),
+                        row.get("amount", 0),
+                        row.get("turnover_rate", 0),
+                        row.get("pct_change", 0),
+                        row.get("adjust_flag", "2"),
+                        source,
+                        row["fetched_at"],
+                    ]
+                )
+
         if records:
-            placeholders = {"calendars": "(?, ?, ?, ?, ?)", "instruments": "(?, ?, ?, ?, ?, ?, ?)", 
-                          "index_components": "(?, ?, ?, ?, ?, ?, ?, ?)", "daily_ohlcv": "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}
+            placeholders = {
+                "calendars": "(?, ?, ?, ?, ?)",
+                "instruments": "(?, ?, ?, ?, ?, ?, ?)",
+                "index_components": "(?, ?, ?, ?, ?, ?, ?, ?)",
+                "daily_ohlcv": "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            }
             sql = f"INSERT OR REPLACE INTO {table_name} VALUES {placeholders[table_type]}"
             conn.executemany(sql, records)
             conn.commit()
             self.update_table_params("ODS", f"ods_{table_type}", len(records), source)
-        
+
         return len(records) if records else 0
-    
-    def list_ods_tables(self, source: Optional[str] = None) -> list:
+
+    def list_ods_tables(self, source: str | None = None) -> list:
         if source:
             df = self.query(f"SELECT table_name FROM meta_ods_tables WHERE source = '{source}'")
             return df["table_name"].tolist() if not df.empty else []
         else:
             df = self.query("SELECT DISTINCT source FROM meta_ods_tables")
             return df["source"].tolist()
-    
+
     def get_ods(self, source: str, table_type: str) -> pd.DataFrame:
         return self.query(f"SELECT * FROM ods_{table_type}_{source} ORDER BY date")
-    
+
     # -------------------------------------------------------------------------
     # DWD Layer
     # -------------------------------------------------------------------------
-    
-    def get_trading_days(self, start: Optional[str] = None, end: Optional[str] = None) -> list[str]:
+
+    def get_trading_days(self, start: str | None = None, end: str | None = None) -> list[str]:
         conditions = ["is_trading_day = TRUE"]
         if start:
             conditions.append(f"date >= '{start}'")
@@ -656,8 +769,13 @@ class QuantDB:
         where = " AND ".join(conditions)
         df = self.query(f"SELECT date FROM dwd_calendars WHERE {where} ORDER BY date")
         return [str(d.date()) for d in df["date"].tolist()]
-    
-    def get_ohlcv(self, symbols: Optional[list[str]] = None, start: Optional[str] = None, end: Optional[str] = None) -> pd.DataFrame:
+
+    def get_ohlcv(
+        self,
+        symbols: list[str] | None = None,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> pd.DataFrame:
         conditions = []
         if symbols:
             symbols_str = "', '".join(symbols)
@@ -670,8 +788,8 @@ class QuantDB:
         df = self.query(f"SELECT * FROM dwd_daily_ohlcv WHERE {where} ORDER BY date, symbol")
         df["date"] = pd.to_datetime(df["date"])
         return df
-    
-    def get_instruments(self, market: Optional[str] = None, active_only: bool = True) -> pd.DataFrame:
+
+    def get_instruments(self, market: str | None = None, active_only: bool = True) -> pd.DataFrame:
         conditions = []
         if market:
             conditions.append(f"market = '{market}'")
@@ -679,7 +797,7 @@ class QuantDB:
             conditions.append("status = 'ACTIVE'")
         where = " AND ".join(conditions) if conditions else "1=1"
         return self.query(f"SELECT * FROM dwd_instruments WHERE {where} ORDER BY symbol")
-    
+
     def get_current_index_members(self, index_code: str) -> pd.DataFrame:
         return self.query(f"""
             SELECT ic.index_code, ic.index_name, ic.symbol, i.name, ic.in_date, ic.weight
@@ -688,20 +806,20 @@ class QuantDB:
             WHERE ic.index_code = '{index_code}' AND ic.is_current = TRUE
             ORDER BY ic.weight DESC
         """)
-    
+
     # -------------------------------------------------------------------------
     # APP Layer
     # -------------------------------------------------------------------------
-    
-    def aggregate_monthly_stats(self, start: Optional[str] = None, end: Optional[str] = None) -> int:
+
+    def aggregate_monthly_stats(self, start: str | None = None, end: str | None = None) -> int:
         where = ""
         if start:
             where += f" WHERE date >= '{start}'"
         if end:
             where += f" WHERE date <= '{end}'" if where else f" AND date <= '{end}'"
-        
+
         sql = f"""
-            INSERT INTO app_monthly_stats 
+            INSERT INTO app_monthly_stats
             (symbol, year, month, start_date, end_date, open_first, close_last, high_max, low_min,
              volume_sum, amount_sum, avg_turnover_rate, pct_change_monthly)
             SELECT symbol, EXTRACT(YEAR FROM date)::INTEGER, EXTRACT(MONTH FROM date)::INTEGER,
@@ -721,18 +839,18 @@ class QuantDB:
         conn = self.execute(sql)
         self.update_table_params("APP", "app_monthly_stats", conn.rowcount)
         return conn.rowcount
-    
+
     # -------------------------------------------------------------------------
     # Validation
     # -------------------------------------------------------------------------
-    
+
     def validate(self, rule: ValidationRule) -> ValidationResult:
         try:
             df = self.query(rule.sql)
             actual = str(df.iloc[0][0]) if len(df) > 0 else "0"
             if "count" in rule.expected.lower():
                 expected_count = int(rule.expected.split("=")[1].strip())
-                passed = (int(actual) == expected_count)
+                passed = int(actual) == expected_count
             elif "max_date" in rule.expected.lower():
                 passed = actual >= str(date.today() - timedelta(days=2))
             else:
@@ -740,8 +858,8 @@ class QuantDB:
             return ValidationResult(rule=rule, passed=passed, expected=rule.expected, actual=actual)
         except Exception as e:
             return ValidationResult(rule=rule, passed=False, expected=rule.expected, actual=str(e))
-    
-    def validate_all(self, layer: Optional[str] = None) -> list[ValidationResult]:
+
+    def validate_all(self, layer: str | None = None) -> list[ValidationResult]:
         rules = VALIDATION_RULES
         if layer:
             rules = [r for r in rules if r.layer == layer]
@@ -752,49 +870,61 @@ class QuantDB:
             details_json = json.dumps(result.details or {})
 
             self.execute(f"""
-                INSERT INTO meta_validation_log 
+                INSERT INTO meta_validation_log
                 (layer, table_name, check_type, check_column, expected_value, actual_value, passed, details)
                 VALUES ('{result.rule.layer}', '{result.rule.table}', '{result.rule.check_type}',
-                        '{result.rule.column}', '{result.expected}', '{result.actual}', 
+                        '{result.rule.column}', '{result.expected}', '{result.actual}',
                         {result.passed}, '{details_json}')
             """)
         return results
-    
+
     # -------------------------------------------------------------------------
     # Update Log
     # -------------------------------------------------------------------------
-    
-    def log_update(self, layer: str, table: str, source: str, update_type: str, records: int, status: str,
-                   start_date: Optional[str] = None, end_date: Optional[str] = None, error: Optional[str] = None) -> None:
-        start_val = 'NULL' if not start_date else f"'{start_date}'"
-        end_val = 'NULL' if not end_date else f"'{end_date}'"
-        error_val = 'NULL' if not error else f"'{error}'"
+
+    def log_update(
+        self,
+        layer: str,
+        table: str,
+        source: str,
+        update_type: str,
+        records: int,
+        status: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        start_val = "NULL" if not start_date else f"'{start_date}'"
+        end_val = "NULL" if not end_date else f"'{end_date}'"
+        error_val = "NULL" if not error else f"'{error}'"
         now = datetime.now()
         max_id = self.query("SELECT COALESCE(MAX(id), 0) as max_id FROM meta_update_log").iloc[0, 0]
         new_id = int(max_id) + 1
         self.execute(f"""
-            INSERT INTO meta_update_log 
-            (id, layer, table_name, source, update_type, start_date, end_date, records_total, 
+            INSERT INTO meta_update_log
+            (id, layer, table_name, source, update_type, start_date, end_date, records_total,
              records_success, records_failed, status, error_message, completed_at)
-            VALUES ({new_id}, '{layer}', '{table}', '{source}', '{update_type}', 
+            VALUES ({new_id}, '{layer}', '{table}', '{source}', '{update_type}',
                     {start_val}, {end_val}, {records}, {records}, 0, '{status}',
                     {error_val}, '{now}')
         """)
-    
-    def get_update_history(self, table: Optional[str] = None, limit: int = 10) -> pd.DataFrame:
+
+    def get_update_history(self, table: str | None = None, limit: int = 10) -> pd.DataFrame:
         where = f"WHERE table_name = '{table}'" if table else ""
-        return self.query(f"SELECT * FROM meta_update_log {where} ORDER BY started_at DESC LIMIT {limit}")
-    
+        return self.query(
+            f"SELECT * FROM meta_update_log {where} ORDER BY started_at DESC LIMIT {limit}"
+        )
+
     # -------------------------------------------------------------------------
     # Data Dictionary
     # -------------------------------------------------------------------------
-    
-    def get_data_dictionary(self, table_name: Optional[str] = None) -> dict:
+
+    def get_data_dictionary(self, table_name: str | None = None) -> dict:
         if table_name:
             return {table_name: DATA_DICTIONARY.get(table_name, {})}
         return DATA_DICTIONARY
-    
-    def print_data_dictionary(self, table_name: Optional[str] = None) -> None:
+
+    def print_data_dictionary(self, table_name: str | None = None) -> None:
         dd = self.get_data_dictionary(table_name)
         for name, info in dd.items():
             if not info:
@@ -805,26 +935,39 @@ class QuantDB:
             print(f"名称: {info.get('name', '')}")
             print(f"层级: {info.get('layer', '')}")
             print(f"描述: {info.get('description', '')}")
-            print(f"\n字段:")
+            print("\n字段:")
             print("-" * 60)
             print(f"{'字段名':<20} {'类型':<10} {'说明':<30}")
             print("-" * 60)
             for field, props in info.get("fields", {}).items():
                 print(f"{field:<20} {props.get('type', ''):<10} {props.get('description', ''):<30}")
-    
+
     # -------------------------------------------------------------------------
     # Info
     # -------------------------------------------------------------------------
-    
+
     def info(self) -> dict[str, Any]:
         info = {"db_path": self.db_path, "sources": self.get_active_sources(), "tables": {}}
-        
+
         info["tables"]["ODS"] = {}
         for source in info["sources"]:
             info["tables"]["ODS"][source] = self.list_ods_tables(source)
-        
-        for layer, tables in [("DWD", ["dwd_calendars", "dwd_instruments", "dwd_index_components", "dwd_daily_ohlcv"]),
-                               ("APP", ["app_monthly_stats", "app_yearly_stats", "app_factors_registry", "app_factors_values"])]:
+
+        for layer, tables in [
+            (
+                "DWD",
+                ["dwd_calendars", "dwd_instruments", "dwd_index_components", "dwd_daily_ohlcv"],
+            ),
+            (
+                "APP",
+                [
+                    "app_monthly_stats",
+                    "app_yearly_stats",
+                    "app_factors_registry",
+                    "app_factors_values",
+                ],
+            ),
+        ]:
             info["tables"][layer] = {}
             for table in tables:
                 try:
@@ -832,5 +975,5 @@ class QuantDB:
                     info["tables"][layer][table] = {"rows": int(count)}
                 except Exception:
                     info["tables"][layer][table] = {"rows": -1}
-        
+
         return info

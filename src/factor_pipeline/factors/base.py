@@ -21,7 +21,7 @@ class FactorResult:
     values: pd.DataFrame  # MultiIndex (date, stock), single column "factor"
     name: str = ""
     dependencies: list[str] = field(default_factory=list)
-    max_window: int = 1          # trailing window needed
+    max_window: int = 1  # trailing window needed
     description: str = ""
     computed_at: datetime = field(default_factory=datetime.now)
 
@@ -51,8 +51,8 @@ class FactorABC(ABC):
     """
 
     name: str = ""
-    dependencies: list[str] = []   # required data keys
-    max_window: int = 1             # trailing days needed
+    dependencies: list[str] = []  # required data keys
+    max_window: int = 1  # trailing days needed
     description: str = ""
 
     def __init__(self, data: dict[str, pd.DataFrame]):
@@ -73,7 +73,9 @@ class FactorABC(ABC):
     def _col(self, key: str) -> pd.DataFrame:
         """Return a column from stored data, ensuring float dtype."""
         if key not in self._data:
-            raise KeyError(f"Factor {self.name} requires data key '{key}' but got: {list(self._data.keys())}")
+            raise KeyError(
+                f"Factor {self.name} requires data key '{key}' but got: {list(self._data.keys())}"
+            )
         df = self._data[key]
         return df.astype(float)
 
@@ -113,10 +115,16 @@ class FactorABC(ABC):
             if window < n:
                 return np.nan
             return (x < x.iloc[-1]).sum() / window
+
         return s.groupby(level=1).rolling(n, min_periods=n).apply(_tsrank, raw=False).droplevel(0)
 
     def CORR(self, s1: pd.Series, s2: pd.Series, n: int) -> pd.Series:
-        return s1.groupby(level=1).rolling(n, min_periods=n).corr(s2.groupby(level=1).shift(0)).droplevel(0)
+        return (
+            s1.groupby(level=1)
+            .rolling(n, min_periods=n)
+            .corr(s2.groupby(level=1).shift(0))
+            .droplevel(0)
+        )
 
     def RANK(self, s: pd.Series) -> pd.Series:
         return s.groupby(level=0).rank(pct=True, ascending=True)
@@ -131,29 +139,41 @@ class FactorABC(ABC):
         return np.sign(s)
 
     def COVIANCE(self, s1: pd.Series, s2: pd.Series, n: int) -> pd.Series:
-        return s1.groupby(level=1).rolling(n, min_periods=n).cov(s2.groupby(level=1).shift(0)).droplevel(0)
+        return (
+            s1.groupby(level=1)
+            .rolling(n, min_periods=n)
+            .cov(s2.groupby(level=1).shift(0))
+            .droplevel(0)
+        )
 
     def SMA(self, s: pd.Series, n: int, m: int) -> pd.Series:
         """Exponential moving average: SMA(A,n,m) = (A*m + prev_SMA*(n-m)) / n"""
-        return s.ewm(alpha=m/n, adjust=False).mean()
+        return s.ewm(alpha=m / n, adjust=False).mean()
 
     def WMA(self, s: pd.Series, n: int) -> pd.Series:
         w = np.arange(1, n + 1)
         w = w / w.sum()
-        return s.groupby(level=1).rolling(n, min_periods=n).apply(
-            lambda x: (x * w[: len(x)]).sum(), raw=False
-        ).droplevel(0)
+        return (
+            s.groupby(level=1)
+            .rolling(n, min_periods=n)
+            .apply(lambda x: (x * w[: len(x)]).sum(), raw=False)
+            .droplevel(0)
+        )
 
     def DECAYLINEAR(self, s: pd.Series, d: int) -> pd.Series:
         """Linear decay weighted average over trailing d days."""
         w = np.arange(1, d + 1)
         w = w / w.sum()
-        return s.groupby(level=1).rolling(d, min_periods=d).apply(
-            lambda x: (x * w[: len(x)]).sum(), raw=False
-        ).droplevel(0)
+        return (
+            s.groupby(level=1)
+            .rolling(d, min_periods=d)
+            .apply(lambda x: (x * w[: len(x)]).sum(), raw=False)
+            .droplevel(0)
+        )
 
     def REGBETA(self, s1: pd.Series, s2: pd.Series, n: int) -> pd.Series:
         """Rolling OLS beta of s1 on s2 over trailing n days."""
+
         def _beta(x):
             if len(x) < n:
                 return np.nan
@@ -161,14 +181,17 @@ class FactorABC(ABC):
             cov = np.cov(x1, x2)[0, 1]
             var = np.var(x2)
             return cov / var if var != 0 else 0.0
+
         return s1.groupby(level=1).rolling(n, min_periods=n).apply(_beta, raw=False).droplevel(0)
 
     def HIGHDAY(self, s: pd.Series, n: int) -> pd.Series:
         """Days since high within trailing n."""
+
         def _hd(x):
             if len(x) < n:
                 return np.nan
             return n - 1 - int(np.argmax(x.values[::-1]))
+
         return s.groupby(level=1).rolling(n, min_periods=n).apply(_hd, raw=False).droplevel(0)
 
     def LOWDAY(self, s: pd.Series, n: int) -> pd.Series:
@@ -176,6 +199,7 @@ class FactorABC(ABC):
             if len(x) < n:
                 return np.nan
             return n - 1 - int(np.argmin(x.values[::-1]))
+
         return s.groupby(level=1).rolling(n, min_periods=n).apply(_ld, raw=False).droplevel(0)
 
     def PROD(self, s: pd.Series, n: int) -> pd.Series:

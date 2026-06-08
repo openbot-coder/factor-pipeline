@@ -9,18 +9,13 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import os
 import sys
-from pathlib import Path
-from typing import Optional
 
 import click
 import pandas as pd
-import yaml
 
 from factor_pipeline.data.storage import DuckDBStorage
-
 
 # =============================================================================
 # CLI Configuration
@@ -33,7 +28,8 @@ DEFAULT_DB = os.environ.get("FACTOR_PIPELINE_DB", "data/ohlcv.duckdb")
 # Helper Functions
 # =============================================================================
 
-def get_db(db_path: Optional[str]) -> DuckDBStorage:
+
+def get_db(db_path: str | None) -> DuckDBStorage:
     """Get database connection."""
     path = db_path or DEFAULT_DB
     if path == ":memory:":
@@ -74,6 +70,7 @@ def print_table_info(tables: list[dict]) -> None:
 # =============================================================================
 # CLI Commands
 # =============================================================================
+
 
 @click.group()
 @click.version_option(version="0.1.0")
@@ -162,8 +159,12 @@ def init_cmd(db: str):
 @click.option("--table", required=True, help="Target table name")
 @click.option("--date-col", default="date", help="Date column name")
 @click.option("--symbol-col", default="symbol", help="Symbol column name")
-@click.option("--if-exists", default="append", type=click.Choice(["append", "replace", "fail"]),
-              help="How to handle existing data")
+@click.option(
+    "--if-exists",
+    default="append",
+    type=click.Choice(["append", "replace", "fail"]),
+    help="How to handle existing data",
+)
 @click.option("--skip-rows", default=0, help="Number of rows to skip")
 @click.option("--encoding", default="utf-8", help="File encoding")
 def import_csv_cmd(
@@ -262,10 +263,15 @@ def import_dir_cmd(
 @click.argument("sql")
 @click.option("--db", default=DEFAULT_DB, help="Database path")
 @click.option("--limit", default=100, help="Result limit")
-@click.option("--format", "output_format", default="table",
-              type=click.Choice(["table", "csv", "json"]), help="Output format")
+@click.option(
+    "--format",
+    "output_format",
+    default="table",
+    type=click.Choice(["table", "csv", "json"]),
+    help="Output format",
+)
 @click.option("--output", "-o", help="Output file path")
-def query_cmd(sql: str, db: str, limit: int, output_format: str, output: Optional[str]):
+def query_cmd(sql: str, db: str, limit: int, output_format: str, output: str | None):
     """Execute SQL query.
 
     Examples:
@@ -305,8 +311,13 @@ def query_cmd(sql: str, db: str, limit: int, output_format: str, output: Optiona
 @click.argument("sql")
 @click.option("--db", default=DEFAULT_DB, help="Database path")
 @click.option("--output", "-o", required=True, help="Output file path")
-@click.option("--format", "output_format", default="csv",
-              type=click.Choice(["csv", "parquet"]), help="Output format")
+@click.option(
+    "--format",
+    "output_format",
+    default="csv",
+    type=click.Choice(["csv", "parquet"]),
+    help="Output format",
+)
 def export_cmd(sql: str, db: str, output: str, output_format: str):
     """Export query results to file.
 
@@ -332,7 +343,7 @@ def export_cmd(sql: str, db: str, output: str, output_format: str):
 @cli.command("stats")
 @click.option("--db", default=DEFAULT_DB, help="Database path")
 @click.option("--table", help="Specific table to show stats")
-def stats_cmd(db: str, table: Optional[str]):
+def stats_cmd(db: str, table: str | None):
     """Show statistics for tables.
 
     Examples:
@@ -375,7 +386,7 @@ def stats_cmd(db: str, table: Optional[str]):
 @click.option("--market", help="Filter by market (SSE, SZSE)")
 @click.option("--active", is_flag=True, help="Only show active instruments")
 @click.option("--output", "-o", help="Output file path")
-def instruments_cmd(db: str, market: Optional[str], active: bool, output: Optional[str]):
+def instruments_cmd(db: str, market: str | None, active: bool, output: str | None):
     """List instruments (symbols).
 
     Examples:
@@ -419,7 +430,7 @@ def instruments_cmd(db: str, market: Optional[str], active: bool, output: Option
 @click.option("--start", help="Start date (YYYY-MM-DD)")
 @click.option("--end", help="End date (YYYY-MM-DD)")
 @click.option("--output", "-o", help="Output file path")
-def calendar_cmd(db: str, start: Optional[str], end: Optional[str], output: Optional[str]):
+def calendar_cmd(db: str, start: str | None, end: str | None, output: str | None):
     """Show trading calendar.
 
     Examples:
@@ -493,6 +504,7 @@ def copy_table_cmd(source: str, target: str, db: str):
 # =============================================================================
 # Main Entry Point
 # =============================================================================
+
 
 def main():
     """Main entry point."""
