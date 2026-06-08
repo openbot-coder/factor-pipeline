@@ -3,12 +3,12 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "factors"))
+# sys.path already configured in conftest.py
 
 import numpy as np
 import pandas as pd
 import pytest
-from expr_engine import (
+from factor_pipeline.factors.expr_engine import (
     TT,
     ExprEngine,
     NodeKind,

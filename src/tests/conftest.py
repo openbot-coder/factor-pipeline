@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 
 # Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 # =============================================================================
@@ -202,13 +202,14 @@ def registry_module():
 @pytest.fixture(autouse=True)
 def reset_factor_registry():
     """Reset factor registry before each test."""
-    from factor_pipeline.factors.registry import FactorRegistry
+    from factor_pipeline.factors.registry import _REGISTRY
 
     # Store original state
-    FactorRegistry._factors.copy()
+    original = dict(_REGISTRY)
     yield
-    # Restore original state (optional cleanup)
-    # FactorRegistry._factors = original
+    # Restore original state
+    _REGISTRY.clear()
+    _REGISTRY.update(original)
 
 
 # =============================================================================
