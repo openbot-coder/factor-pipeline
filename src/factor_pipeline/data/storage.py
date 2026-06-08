@@ -31,12 +31,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 import duckdb
-import numpy as np
 import pandas as pd
-
 
 # =============================================================================
 # Schema Definitions
@@ -97,6 +95,7 @@ INDEXES = [
 # DataPreprocessor Class (merged from data/preprocessor.py)
 # =============================================================================
 
+
 class DataPreprocessor:
     """Align, clean, and prepare data for factor computation."""
 
@@ -130,13 +129,17 @@ class DataPreprocessor:
             valid_stocks = valid_stocks.intersection(valid) if valid_stocks else set(valid)
         return {k: v[v.index.get_level_values(1).isin(valid_stocks)] for k, v in aligned.items()}
 
-    def winsorize(self, data: dict[str, pd.DataFrame], limits: float = 0.01) -> dict[str, pd.DataFrame]:
+    def winsorize(
+        self, data: dict[str, pd.DataFrame], limits: float = 0.01
+    ) -> dict[str, pd.DataFrame]:
         """Winsorize extreme values per cross-section."""
         result = {}
         for name, df in data.items():
+
             def _clip(x):
                 lo, hi = x.quantile(limits), x.quantile(1 - limits)
                 return x.clip(lo, hi)
+
             result[name] = df.groupby(level=0).transform(_clip) if not df.empty else df
         return result
 
@@ -157,6 +160,7 @@ class DataPreprocessor:
 # DuckDBStorage Class
 # =============================================================================
 
+
 class DuckDBStorage:
     """DuckDB storage manager for financial data.
 
@@ -168,7 +172,7 @@ class DuckDBStorage:
         self,
         db_path: str = ":memory:",
         read_only: bool = False,
-        config: Optional[dict] = None,
+        config: dict | None = None,
     ):
         """Initialize DuckDB storage.
 
@@ -180,7 +184,7 @@ class DuckDBStorage:
         self.db_path = db_path
         self.read_only = read_only
         self.config = config or {}
-        self._conn: Optional[duckdb.DuckDBPyConnection] = None
+        self._conn: duckdb.DuckDBPyConnection | None = None
         self.preprocess = DataPreprocessor({})  # Placeholder, updated on load
 
         # Auto-create if file doesn't exist
@@ -207,7 +211,7 @@ class DuckDBStorage:
             self._conn.close()
             self._conn = None
 
-    def __enter__(self) -> "DuckDBStorage":
+    def __enter__(self) -> DuckDBStorage:
         self.connect()
         return self
 
@@ -274,8 +278,8 @@ class DuckDBStorage:
         date_col: str = "date",
         symbol_col: str = "symbol",
         if_exists: str = "append",
-        parse_dates: Optional[list[str]] = None,
-        columns_map: Optional[dict[str, str]] = None,
+        parse_dates: list[str] | None = None,
+        columns_map: dict[str, str] | None = None,
         **kwargs,
     ) -> int:
         """Import CSV file into DuckDB table.
@@ -323,7 +327,9 @@ class DuckDBStorage:
         elif if_exists == "fail":
             count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             if count > 0:
-                raise ValueError(f"Table {table} already has data. Use if_exists='replace' or 'append'.")
+                raise ValueError(
+                    f"Table {table} already has data. Use if_exists='replace' or 'append'."
+                )
 
         conn.commit()
         return len(df)
@@ -349,7 +355,7 @@ class DuckDBStorage:
         self,
         excel_path: str,
         table: str,
-        sheet_name: Union[str, int] = 0,
+        sheet_name: str | int = 0,
         if_exists: str = "append",
     ) -> int:
         """Import Excel file into DuckDB table."""
@@ -409,7 +415,7 @@ class DuckDBStorage:
     # Query Methods
     # -------------------------------------------------------------------------
 
-    def query(self, sql: str, params: Optional[dict] = None) -> pd.DataFrame:
+    def query(self, sql: str, params: dict | None = None) -> pd.DataFrame:
         """Execute SQL query and return DataFrame.
 
         Args:
@@ -424,7 +430,7 @@ class DuckDBStorage:
             return conn.execute(sql, params).fetchdf()
         return conn.execute(sql).fetchdf()
 
-    def execute(self, sql: str, params: Optional[dict] = None) -> duckdb.DuckDBPyConnection:
+    def execute(self, sql: str, params: dict | None = None) -> duckdb.DuckDBPyConnection:
         """Execute SQL without returning results."""
         conn = self.connect()
         if params:
@@ -434,7 +440,7 @@ class DuckDBStorage:
         conn.commit()
         return conn
 
-    def fetchone(self, sql: str) -> Optional[tuple]:
+    def fetchone(self, sql: str) -> tuple | None:
         """Execute SQL and fetch one row."""
         conn = self.connect()
         return conn.execute(sql).fetchone()
@@ -445,9 +451,9 @@ class DuckDBStorage:
 
     def get_instruments(
         self,
-        market: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        market: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
     ) -> list[str]:
         """Get list of instruments (symbols).
 
@@ -474,8 +480,8 @@ class DuckDBStorage:
 
     def get_calendar(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
     ) -> list[str]:
         """Get trading calendar dates.
 
@@ -499,10 +505,10 @@ class DuckDBStorage:
 
     def get_ohlcv(
         self,
-        symbols: Optional[list[str]] = None,
-        fields: Optional[list[str]] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        symbols: list[str] | None = None,
+        fields: list[str] | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         index: bool = True,
     ) -> pd.DataFrame:
         """Get OHLCV data.
@@ -759,7 +765,9 @@ class DuckDBStorage:
         # Check daily_ohlcv structure
         if "daily_ohlcv" in tables:
             schema = self.show_schema()
-            ohlcv_cols = [col["column_name"] for col in schema if col["table_name"] == "daily_ohlcv"]
+            ohlcv_cols = [
+                col["column_name"] for col in schema if col["table_name"] == "daily_ohlcv"
+            ]
             required_cols = ["date", "symbol", "open", "high", "low", "close", "volume"]
             for col in required_cols:
                 if col not in ohlcv_cols:

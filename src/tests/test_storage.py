@@ -8,24 +8,21 @@ Coverage:
 - Edge cases: empty DB, invalid data, duplicates
 """
 
-import os
-import tempfile
-from datetime import date, datetime
+# Import the module being tested
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-# Import the module being tested
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from factor_pipeline.data.storage import DuckDBStorage, SCHEMA_DAILY_OHLCV, SCHEMA_INSTRUMENTS
-
+from factor_pipeline.data.storage import DuckDBStorage
 
 # =============================================================================
 # Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def temp_db():
@@ -46,17 +43,19 @@ def sample_ohlcv():
         price = 100.0
         for d in dates:
             price = price * (1 + np.random.randn() * 0.01)
-            records.append({
-                "date": d,
-                "symbol": symbol,
-                "open": price * 0.99,
-                "high": price * 1.02,
-                "low": price * 0.98,
-                "close": price,
-                "volume": np.random.randint(1e6, 1e8),
-                "amount": price * np.random.randint(1e6, 1e8),
-                "factor": 1.0,
-            })
+            records.append(
+                {
+                    "date": d,
+                    "symbol": symbol,
+                    "open": price * 0.99,
+                    "high": price * 1.02,
+                    "low": price * 0.98,
+                    "close": price,
+                    "volume": np.random.randint(1e6, 1e8),
+                    "amount": price * np.random.randint(1e6, 1e8),
+                    "factor": 1.0,
+                }
+            )
     return pd.DataFrame(records)
 
 
@@ -71,6 +70,7 @@ def sample_csv(tmp_path, sample_ohlcv):
 # =============================================================================
 # Schema Tests
 # =============================================================================
+
 
 class TestSchemaInit:
     """Tests for database schema initialization."""
@@ -114,6 +114,7 @@ class TestSchemaInit:
 # Import Tests
 # =============================================================================
 
+
 class TestImportCSV:
     """Tests for CSV import functionality."""
 
@@ -130,7 +131,6 @@ class TestImportCSV:
         temp_db.import_csv(sample_csv, table="daily_ohlcv")
 
         # Create second CSV with different data
-        csv2 = temp_db.db_path if temp_db.db_path != ":memory:" else None
         temp_db.import_csv(sample_csv, table="daily_ohlcv", if_exists="append")
 
         total = temp_db.count_ohlcv()
@@ -150,16 +150,18 @@ class TestImportCSV:
         temp_db.init_schema()
 
         # Create CSV with different column names
-        df = pd.DataFrame({
-            "trade_date": ["2024-01-01", "2024-01-02"],
-            "stock_code": ["000001", "000002"],
-            "o": [10.0, 11.0],
-            "h": [11.0, 12.0],
-            "l": [9.0, 10.0],
-            "c": [10.5, 11.5],
-            "v": [1e6, 2e6],
-            "a": [10.5e6, 23e6],
-        })
+        df = pd.DataFrame(
+            {
+                "trade_date": ["2024-01-01", "2024-01-02"],
+                "stock_code": ["000001", "000002"],
+                "o": [10.0, 11.0],
+                "h": [11.0, 12.0],
+                "l": [9.0, 10.0],
+                "c": [10.5, 11.5],
+                "v": [1e6, 2e6],
+                "a": [10.5e6, 23e6],
+            }
+        )
         csv_path = tmp_path / "mapped.csv"
         df.to_csv(csv_path, index=False)
 
@@ -175,7 +177,7 @@ class TestImportCSV:
                 "c": "close",
                 "v": "volume",
                 "a": "amount",
-            }
+            },
         )
 
         assert rows == 2
@@ -202,11 +204,13 @@ class TestImportCSV:
         """Edge: Import with invalid date format (handled as NaT)."""
         temp_db.init_schema()
 
-        df = pd.DataFrame({
-            "date": ["invalid", "2024-01-02"],
-            "symbol": ["000001", "000002"],
-            "close": [10.0, 11.0],
-        })
+        df = pd.DataFrame(
+            {
+                "date": ["invalid", "2024-01-02"],
+                "symbol": ["000001", "000002"],
+                "close": [10.0, 11.0],
+            }
+        )
         csv_path = tmp_path / "bad_date.csv"
         df.to_csv(csv_path, index=False)
 
@@ -219,6 +223,7 @@ class TestImportCSV:
 # =============================================================================
 # Query Tests
 # =============================================================================
+
 
 class TestQuery:
     """Tests for SQL query execution."""
@@ -281,6 +286,7 @@ class TestQuery:
 # =============================================================================
 # OHLCV Specific Tests
 # =============================================================================
+
 
 class TestOHLCVMethods:
     """Tests for OHLCV-specific methods."""
@@ -348,6 +354,7 @@ class TestOHLCVMethods:
 # Export Tests
 # =============================================================================
 
+
 class TestExport:
     """Tests for data export functionality."""
 
@@ -389,6 +396,7 @@ class TestExport:
 # Database Info Tests
 # =============================================================================
 
+
 class TestDatabaseInfo:
     """Tests for database information methods."""
 
@@ -421,6 +429,7 @@ class TestDatabaseInfo:
 # =============================================================================
 # Utility Tests
 # =============================================================================
+
 
 class TestUtilities:
     """Tests for utility methods."""
@@ -470,6 +479,7 @@ class TestUtilities:
 # File-based Database Tests
 # =============================================================================
 
+
 class TestFileDatabase:
     """Tests for file-based database (non-in-memory)."""
 
@@ -498,6 +508,7 @@ class TestFileDatabase:
 # Context Manager Tests
 # =============================================================================
 
+
 class TestContextManager:
     """Tests for context manager support."""
 
@@ -524,6 +535,7 @@ class TestContextManager:
 # Edge Cases
 # =============================================================================
 
+
 class TestEdgeCases:
     """Tests for edge cases and boundary conditions."""
 
@@ -539,16 +551,18 @@ class TestEdgeCases:
         """Edge: Symbols with special characters."""
         temp_db.init_schema()
 
-        df = pd.DataFrame({
-            "date": ["2024-01-01", "2024-01-02"],
-            "symbol": ["600000.SH", "000001.SZ"],  # With market suffix
-            "close": [10.0, 11.0],
-            "open": [9.5, 10.5],
-            "high": [10.5, 11.5],
-            "low": [9.0, 10.0],
-            "volume": [1e6, 2e6],
-            "amount": [10e6, 22e6],
-        })
+        df = pd.DataFrame(
+            {
+                "date": ["2024-01-01", "2024-01-02"],
+                "symbol": ["600000.SH", "000001.SZ"],  # With market suffix
+                "close": [10.0, 11.0],
+                "open": [9.5, 10.5],
+                "high": [10.5, 11.5],
+                "low": [9.0, 10.0],
+                "volume": [1e6, 2e6],
+                "amount": [10e6, 22e6],
+            }
+        )
         csv_path = tmp_path / "special.csv"
         df.to_csv(csv_path, index=False)
 
@@ -559,16 +573,18 @@ class TestEdgeCases:
         """Edge: CSV with null values."""
         temp_db.init_schema()
 
-        df = pd.DataFrame({
-            "date": ["2024-01-01", "2024-01-02"],
-            "symbol": ["000001", "000002"],
-            "close": [10.0, None],  # Null value
-            "open": [9.5, 10.5],
-            "high": [10.5, 11.5],
-            "low": [9.0, 10.0],
-            "volume": [1e6, 2e6],
-            "amount": [10e6, 22e6],
-        })
+        df = pd.DataFrame(
+            {
+                "date": ["2024-01-01", "2024-01-02"],
+                "symbol": ["000001", "000002"],
+                "close": [10.0, None],  # Null value
+                "open": [9.5, 10.5],
+                "high": [10.5, 11.5],
+                "low": [9.0, 10.0],
+                "volume": [1e6, 2e6],
+                "amount": [10e6, 22e6],
+            }
+        )
         csv_path = tmp_path / "nulls.csv"
         df.to_csv(csv_path, index=False)
 
@@ -586,16 +602,18 @@ class TestEdgeCases:
 
         records = []
         for i in range(n):
-            records.append({
-                "date": dates[i % 100],
-                "symbol": symbols[i % 100],
-                "open": 10.0 + i * 0.01,
-                "high": 10.5 + i * 0.01,
-                "low": 9.5 + i * 0.01,
-                "close": 10.0 + i * 0.01,
-                "volume": 1e6,
-                "amount": 10e6,
-            })
+            records.append(
+                {
+                    "date": dates[i % 100],
+                    "symbol": symbols[i % 100],
+                    "open": 10.0 + i * 0.01,
+                    "high": 10.5 + i * 0.01,
+                    "low": 9.5 + i * 0.01,
+                    "close": 10.0 + i * 0.01,
+                    "volume": 1e6,
+                    "amount": 10e6,
+                }
+            )
 
         df = pd.DataFrame(records)
         csv_path = tmp_path / "large.csv"

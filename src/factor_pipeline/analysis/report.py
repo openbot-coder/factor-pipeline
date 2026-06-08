@@ -8,15 +8,15 @@ from io import BytesIO
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import seaborn as sns
 from jinja2 import Environment, FileSystemLoader
 
-from analysis.ic import ICAnalysis
-from analysis.layered import LayeredBacktest
+from factor_pipeline.analysis.ic import ICAnalysis
+from factor_pipeline.analysis.layered import LayeredBacktest
 
 sns.set_theme(style="whitegrid", font_scale=0.8)
 
@@ -60,7 +60,7 @@ class FactorReport:
     def run(self, n_quantiles: int = 5, periods: tuple = (1, 5, 10)):
         """Run IC analysis + layered backtest for all forward periods."""
         close = self.prices["close"].copy()
-        period = periods[0]   # primary period
+        period = periods[0]  # primary period
         shifted = close.groupby(level=1).shift(-period)
         fwd_ret = (shifted / close - 1).dropna()
 

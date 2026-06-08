@@ -12,7 +12,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-import scipy.stats as stats
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -20,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # =============================================================================
 # Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def multiindex_data():
@@ -60,12 +60,14 @@ def aligned_data():
 # IC Analysis Tests
 # =============================================================================
 
+
 class TestICAnalysis:
     """Tests for IC (Information Coefficient) analysis."""
 
     def test_import(self):
         """Positive: Import ICAnalysis."""
         from factor_pipeline.analysis.ic import ICAnalysis
+
         assert ICAnalysis is not None
 
     def test_spearman_ic_positive_signal(self):
@@ -213,12 +215,14 @@ class TestICAnalysis:
 # Layered Backtest Tests
 # =============================================================================
 
+
 class TestLayeredBacktest:
     """Tests for Layered Backtest."""
 
     def test_import(self):
         """Positive: Import LayeredBacktest."""
         from factor_pipeline.analysis.layered import LayeredBacktest
+
         assert LayeredBacktest is not None
 
     def test_quantile_calculation(self, aligned_data):
@@ -280,10 +284,7 @@ class TestLayeredBacktest:
         from factor_pipeline.analysis.layered import LayeredBacktest
 
         dates = pd.date_range("2024-01-01", periods=50, freq="B")
-        idx = pd.MultiIndex.from_tuples(
-            [(d, "S001") for d in dates],
-            names=["date", "stock"]
-        )
+        idx = pd.MultiIndex.from_tuples([(d, "S001") for d in dates], names=["date", "stock"])
 
         np.random.seed(42)
         factor = pd.Series(np.random.randn(50), index=idx, name="factor")
@@ -338,12 +339,14 @@ class TestLayeredBacktest:
 # Factor Registry Tests
 # =============================================================================
 
+
 class TestFactorRegistry:
     """Tests for Factor Registry."""
 
     def test_import(self):
         """Positive: Import FactorRegistry."""
         from factor_pipeline.factors.registry import FactorRegistry
+
         assert FactorRegistry is not None
 
     def test_register_decorator(self):
@@ -363,7 +366,7 @@ class TestFactorRegistry:
 
     def test_register_class(self):
         """Positive: Register factor class."""
-        from factor_pipeline.factors.registry import FactorRegistry, FactorBase
+        from factor_pipeline.factors.registry import FactorBase, FactorRegistry
 
         class TestFactorClass(FactorBase):
             name = "test_factor_002"
@@ -418,6 +421,7 @@ class TestFactorRegistry:
 
         # Try to register with same name
         with pytest.raises(ValueError):
+
             @register_factor("test_duplicate")
             def factor_b(data):
                 return pd.Series([2])
@@ -462,8 +466,9 @@ class TestFactorRegistry:
 
     def test_load_gtja_factors(self):
         """Positive: Load GTJA 191 factors."""
-        from factor_pipeline.factors.registry import FactorRegistry
         import importlib
+
+        from factor_pipeline.factors.registry import FactorRegistry
 
         importlib.import_module("factors.gtja191")
 
@@ -473,8 +478,9 @@ class TestFactorRegistry:
 
     def test_load_technical_factors(self):
         """Positive: Load technical factors."""
-        from factor_pipeline.factors.registry import FactorRegistry
         import importlib
+
+        from factor_pipeline.factors.registry import FactorRegistry
 
         importlib.import_module("factors.technical")
 
@@ -486,6 +492,7 @@ class TestFactorRegistry:
 # =============================================================================
 # Integration Tests
 # =============================================================================
+
 
 class TestIntegration:
     """Integration tests combining multiple components."""
@@ -511,9 +518,9 @@ class TestIntegration:
 
     def test_factor_calculation_pipeline(self):
         """Positive: Factor calculation with GTJA factor."""
-        from factor_pipeline.factors.registry import FactorRegistry
-        from factor_pipeline.analysis.ic import ICAnalysis
         import importlib
+
+        from factor_pipeline.factors.registry import FactorRegistry
 
         # Load factors
         importlib.import_module("factors.gtja191")
@@ -544,9 +551,10 @@ class TestIntegration:
 
     def test_multiple_factors_ic(self):
         """Positive: Calculate IC for multiple factors."""
-        from factor_pipeline.factors.registry import FactorRegistry
-        from factor_pipeline.analysis.ic import ICAnalysis
         import importlib
+
+        from factor_pipeline.analysis.ic import ICAnalysis
+        from factor_pipeline.factors.registry import FactorRegistry
 
         # Load factors
         importlib.import_module("factors.gtja191")
@@ -586,6 +594,7 @@ class TestIntegration:
 # Edge Case Tests
 # =============================================================================
 
+
 class TestEdgeCases:
     """Edge case tests for analysis modules."""
 
@@ -603,7 +612,7 @@ class TestEdgeCases:
         ic = ICAnalysis(factor, ret)
         # Should handle gracefully
         try:
-            result = ic.run("spearman")
+            ic.run("spearman")
             # Empty result is acceptable
         except Exception:
             pass  # Some implementations may raise
@@ -631,8 +640,7 @@ class TestEdgeCases:
 
         stocks = [f"S{i:03d}" for i in range(10)]
         idx = pd.MultiIndex.from_tuples(
-            [("2024-01-01", s) for s in stocks],
-            names=["date", "stock"]
+            [("2024-01-01", s) for s in stocks], names=["date", "stock"]
         )
 
         np.random.seed(42)

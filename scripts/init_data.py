@@ -1,0 +1,427 @@
+#!/usr/bin/env python3
+"""数据初始化脚本 - 初始化量化数据库 (3层架构 + ETL分离)
+
+分层设计:
+- ODS (原始数据层): 按数据源分表 (ods_xxx_baostock)
+- DWD (明细数据层): 标准化数据
+- APP (应用数据层): 聚合统计、因子数据
+- ETL (数据迁移): 独立的迁移脚本
+
+Usage:
+    # 全量初始化 (ODS + ETL + APP)
+    python scripts/init_data.py --mode full --db data/quant.db
+
+    # 仅拉取原始数据到ODS
+    python scripts/init_data.py --mode ods --db data/quant.db
+
+    # 仅执行ETL迁移
+    python scripts/init_data.py --mode etl --db data/quant.db
+
+    # 仅初始化K线
+    python scripts/init_data.py --mode ohlcv --db data/quant.db --start 2020-01-01
+"""
+
+import argparse
+import sys
+from datetime import date, datetime, timedelta
+from pathlib import Path
+
+import pandas as pd
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from factor_pipeline.data.quantdb import QuantDB
+from factor_pipeline.data.etl import ETLPipeline
+
+
+# =============================================================================
+# Configuration - 配置
+# =============================================================================
+
+INDICES = {
+    "000016.SH": {"name": "上证50", "category": "宽基"},
+    "000300.SH": {"name": "沪深300", "category": "宽基"},
+    "000905.SH": {"name": "中证500", "category": "宽基"},
+    "000852.SH": {"name": "中证1000", "category": "宽基"},
+}
+
+
+# =============================================================================
+# Data Fetchers - 数据拉取 (不关心ODS表名)
+# =============================================================================
+
+def generate_trading_calendar(start_year: int = 2005, end_year: int = None) -> pd.DataFrame:
+    """生成A股交易日历"""
+    if end_year is None:
+        end_year = date.today().year
+    
+    holidays = set()
+    for year in range(start_year, end_year + 1):
+        holidays.add(f"{year}-01-01")
+        holidays.add(f"{year}-01-02")
+        holidays.add(f"{year}-01-03")
+        for day in range(1, 8):
+            holidays.add(f"{year}-02-{day:02d}")
+        holidays.add(f"{year}-04-04")
+        holidays.add(f"{year}-04-05")
+        holidays.add(f"{year}-04-06")
+        holidays.add(f"{year}-05-01")
+        holidays.add(f"{year}-05-02")
+        holidays.add(f"{year}-05-03")
+        holidays.add(f"{year}-06-{22 + year % 3:02d}")
+        holidays.add(f"{year}-09-{15 + year % 2:02d}")
+        for day in range(1, 8):
+            holidays.add(f"{year}-10-{day:02d}")
+    
+    records = []
+    current = date(start_year, 1, 1)
+    end = date(end_year + 1, 1, 1)
+    
+    while current < end:
+        if current.weekday() < 5:
+            date_str = current.strftime("%Y-%m-%d")
+            records.append({
+                "date": date_str,
+                "exchange": "ALL",
+                "is_trading_day": date_str not in holidays,
+            })
+        current += timedelta(days=1)
+    
+    return pd.DataFrame(records)
+
+
+def fetch_instruments_baostock() -> pd.DataFrame:
+    """从baostock获取股票列表"""
+    try:
+        import baostock as bs
+        
+        lg = bs.login()
+        rs = bs.query_all_stock(day=date.today().strftime("%Y-%m-%d"))
+        
+        records = []
+        while rs.error_code == "0" and rs.next():
+            row = rs.get_row_data()
+            if row[1] in ["1", "2", "3", "4", "5"]:
+                code = row[0].split(".")[1]
+                exchange = "SSE" if row[0].startswith("sh") else "SZSE"
+                records.append({
+                    "symbol": f"{code}.{exchange}",
+                    "name": row[2],
+                    "market": exchange,
+                })
+        
+        bs.logout()
+        return pd.DataFrame(records)
+    except ImportError:
+        return pd.DataFrame()
+
+
+def fetch_index_components_baostock(index_code: str) -> pd.DataFrame:
+    """从baostock获取指数成分股"""
+    try:
+        import baostock as bs
+        
+        bs_code = index_code.replace(".SH", ".sh")
+        lg = bs.login()
+        
+        rs = bs.query_index_stock_weight(bs_code)
+        
+        records = []
+        while rs.error_code == "0" and rs.next():
+            row = rs.get_row_data()
+            code = row["stockCode"].split(".")[1]
+            exchange = "SSE" if row["stockCode"].startswith("sh") else "SZSE"
+            index_name = INDICES.get(index_code, {}).get("name", index_code)
+            records.append({
+                "index_code": index_code,
+                "index_name": index_name,
+                "symbol": f"{code}.{exchange}",
+                "in_date": row["inDate"],
+                "out_date": None if row["outDate"] == "" else row["outDate"],
+                "weight": float(row["weight"]) if row["weight"] else 0.0,
+            })
+        
+        bs.logout()
+        return pd.DataFrame(records)
+    except ImportError:
+        return pd.DataFrame()
+
+
+def fetch_ohlcv_baostock(
+    symbols: list[str],
+    start: str,
+    end: str,
+    adjust: str = "2",  # 前复权
+) -> pd.DataFrame:
+    """从baostock获取K线数据"""
+    try:
+        import baostock as bs
+        
+        lg = bs.login()
+        all_records = []
+        
+        for symbol in symbols:
+            bs_code = f"sh.{symbol}" if ".SH" in symbol else f"sz.{symbol}"
+            
+            rs = bs.query_history_k_data_plus(
+                bs_code,
+                "date,open,high,low,close,volume,amount,turnover,pctChg",
+                start_date=start,
+                end_date=end,
+                frequency="d",
+                adjustflag=adjust,
+            )
+            
+            while rs.error_code == "0" and rs.next():
+                row = rs.get_row_data()
+                all_records.append({
+                    "date": row[0],
+                    "symbol": symbol,
+                    "open": float(row[1]) if row[1] else 0,
+                    "high": float(row[2]) if row[2] else 0,
+                    "low": float(row[3]) if row[3] else 0,
+                    "close": float(row[4]) if row[4] else 0,
+                    "volume": float(row[5]) if row[5] else 0,
+                    "amount": float(row[6]) if row[6] else 0,
+                    "turnover_rate": float(row[7]) if row[7] else 0,
+                    "pct_change": float(row[8]) if row[8] else 0,
+                    "adjust_flag": adjust,
+                })
+        
+        bs.logout()
+        return pd.DataFrame(all_records)
+    except ImportError:
+        return pd.DataFrame()
+
+
+# =============================================================================
+# Init Functions - 初始化函数
+# =============================================================================
+
+def init_ods(db: QuantDB, args) -> dict:
+    """初始化ODS原始数据层"""
+    print("\n" + "=" * 50)
+    print("📦 [ODS] 拉取原始数据")
+    print("=" * 50)
+    
+    source = args.source
+    results = {}
+    
+    # 创建ODS表
+    db.create_ods_tables(source)
+    
+    # 拉取日历
+    print("\n📅 拉取日历...")
+    df = generate_trading_calendar(2005, date.today().year)
+    rows = db.import_ods(source, "calendars", df)
+    results["calendars"] = rows
+    print(f"   ✅ {rows} 条")
+    
+    # 拉取股票列表
+    print("\n📋 拉取股票列表...")
+    df = fetch_instruments_baostock()
+    if not df.empty:
+        rows = db.import_ods(source, "instruments", df)
+        results["instruments"] = rows
+        print(f"   ✅ {rows} 只股票")
+    else:
+        results["instruments"] = 0
+        print("   ⚠️ 未获取到股票")
+    
+    # 拉取指数成分
+    print("\n📊 拉取指数成分...")
+    total = 0
+    for code in INDICES.keys():
+        df = fetch_index_components_baostock(code)
+        if not df.empty:
+            db.import_ods(source, "index_components", df)
+            total += len(df)
+            print(f"   ✅ {code}: {len(df)} 只")
+    results["index_components"] = total
+    
+    # 拉取K线
+    if args.mode == "ohlcv" or args.mode == "full":
+        print("\n📈 拉取K线数据...")
+        end = args.end or date.today().strftime("%Y-%m-%d")
+        
+        df = db.query(f"SELECT symbol FROM ods_instruments_{source}")
+        symbols = df["symbol"].tolist()[:100]  # 限制数量
+        
+        print(f"   股票数: {len(symbols)}, 日期: {args.start} ~ {end}")
+        
+        total = 0
+        batch_size = 50
+        for i in range(0, len(symbols), batch_size):
+            batch = symbols[i:i + batch_size]
+            print(f"   处理 {i + 1} ~ {i + len(batch)}...")
+            df = fetch_ohlcv_baostock(batch, args.start, end)
+            if not df.empty:
+                rows = db.import_ods(source, "daily_ohlcv", df)
+                total += rows
+        
+        results["daily_ohlcv"] = total
+        print(f"   ✅ {total} 条K线")
+    
+    return results
+
+
+def init_etl(db: QuantDB, args) -> dict:
+    """执行ETL迁移"""
+    print("\n" + "=" * 50)
+    print("🔄 [ETL] 数据迁移")
+    print("=" * 50)
+    
+    etl = ETLPipeline(db)
+    
+    if args.source:
+        results = etl.run(source=args.source)
+    else:
+        results = etl.run()
+    
+    return results
+
+
+def init_app(db: QuantDB, args) -> dict:
+    """初始化APP应用数据层"""
+    print("\n" + "=" * 50)
+    print("📊 [APP] 聚合汇总")
+    print("=" * 50)
+    
+    results = {}
+    
+    print("📅 月度统计...")
+    rows = db.aggregate_monthly_stats()
+    results["monthly"] = rows
+    print(f"   ✅ {rows} 条")
+    
+    return results
+
+
+def validate_data(db: QuantDB) -> dict:
+    """校验数据"""
+    print("\n" + "=" * 50)
+    print("🔍 [校验] 数据质量检查")
+    print("=" * 50)
+    
+    results = db.validate_all()
+    
+    passed = sum(1 for r in results if r.passed)
+    failed = len(results) - passed
+    
+    print(f"\n校验结果: {passed} 通过, {failed} 失败")
+    
+    for r in results:
+        status = "✅" if r.passed else "❌"
+        print(f"   {status} {r.rule.name}: {r.actual}")
+    
+    return {"total": len(results), "passed": passed, "failed": failed}
+
+
+# =============================================================================
+# Main - 主函数
+# =============================================================================
+
+def parse_args():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(
+        description="初始化量化数据库 (3层架构 + ETL分离)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    
+    parser.add_argument("--db", type=str, default="data/quant.db", help="数据库路径")
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["full", "ods", "etl", "app", "validate", "calendar", "ohlcv"],
+        default="full",
+        help="初始化模式",
+    )
+    parser.add_argument("--start", type=str, default="2005-01-01", help="K线开始日期")
+    parser.add_argument("--end", type=str, default=None, help="K线结束日期")
+    parser.add_argument("--source", type=str, default="baostock", help="数据源")
+    parser.add_argument("--force", action="store_true", help="强制重新初始化")
+    parser.add_argument("--skip-validation", action="store_true", help="跳过校验")
+    
+    return parser.parse_args()
+
+
+def main():
+    """主函数"""
+    args = parse_args()
+    
+    print("=" * 60)
+    print("量化数据库初始化 (3层架构 + ETL分离)")
+    print("=" * 60)
+    print(f"数据库: {args.db}")
+    print(f"模式: {args.mode}")
+    print(f"数据源: {args.source}")
+    print("=" * 60)
+    
+    Path(args.db).parent.mkdir(parents=True, exist_ok=True)
+    
+    db = QuantDB(args.db)
+    
+    if args.force:
+        print("⚠️ 强制模式，将重建数据库...")
+        db.init_schema()
+    
+    # 注册数据源
+    db.register_source(args.source, priority=1)
+    
+    results = {}
+    
+    # ODS层
+    if args.mode in ["full", "ods", "calendar", "ohlcv"]:
+        results["ods"] = init_ods(db, args)
+    
+    # ETL迁移
+    if args.mode in ["full", "etl"]:
+        results["etl"] = init_etl(db, args)
+    
+    # APP层
+    if args.mode in ["full", "app"]:
+        results["app"] = init_app(db, args)
+    
+    # 校验
+    if args.mode == "validate":
+        results["validation"] = validate_data(db)
+    elif args.mode == "full" and not args.skip_validation:
+        results["validation"] = validate_data(db)
+    
+    # 显示最终统计
+    print("\n" + "=" * 60)
+    print("初始化完成!")
+    print("=" * 60)
+    
+    # 显示参数表
+    print("\n" + "-" * 60)
+    print("📋 参数表状态 (meta_table_params)")
+    print("-" * 60)
+    params = db.get_all_table_status()
+    if not params.empty:
+        for _, row in params.iterrows():
+            source_str = f" [{row['source']}]" if row['source'] else ""
+            print(f"  [{row['layer']}] {row['table_name']}{source_str}: {row['freshness']} ({row['last_update_records']} 条)")
+    else:
+        print("  (无记录)")
+    
+    info = db.info()
+    print(f"\n数据库路径: {args.db}")
+    print(f"数据源: {', '.join(info['sources'])}")
+    print("\n表统计:")
+    
+    for layer, data in info["tables"].items():
+        print(f"\n  [{layer}]")
+        if isinstance(data, dict):
+            for name, info_data in data.items():
+                if isinstance(info_data, dict):
+                    print(f"    {name}: {info_data.get('rows', 0)} 条")
+                elif isinstance(info_data, list):
+                    print(f"    {name}: {len(info_data)} 个表")
+    
+    db.close()
+
+
+if __name__ == "__main__":
+    main()

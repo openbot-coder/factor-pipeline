@@ -20,22 +20,32 @@ Usage:
 
 from __future__ import annotations
 
-import math
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Union
+from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import pandas as pd
-
 
 # =============================================================================
 # Column Definitions
 # =============================================================================
 
 COLUMNS = {
-    "$open", "$high", "$low", "$close", "$volume", "$amount", "$factor",
-    "open", "high", "low", "close", "volume", "amount", "factor",
+    "$open",
+    "$high",
+    "$low",
+    "$close",
+    "$volume",
+    "$amount",
+    "$factor",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "amount",
+    "factor",
 }
 
 
@@ -56,6 +66,7 @@ def _ensure_col(col: str) -> str:
 # =============================================================================
 # Base Operator Classes
 # =============================================================================
+
 
 @dataclass
 class Operator(ABC):
@@ -492,7 +503,9 @@ class First(WindowOp):
     window_required = 1
 
     def _compute(self, x: np.ndarray, window: int) -> np.ndarray:
-        return pd.Series(x).rolling(window, min_periods=1).apply(lambda y: y.iloc[0], raw=True).values
+        return (
+            pd.Series(x).rolling(window, min_periods=1).apply(lambda y: y.iloc[0], raw=True).values
+        )
 
 
 class Last(WindowOp):
@@ -502,7 +515,9 @@ class Last(WindowOp):
     window_required = 1
 
     def _compute(self, x: np.ndarray, window: int) -> np.ndarray:
-        return pd.Series(x).rolling(window, min_periods=1).apply(lambda y: y.iloc[-1], raw=True).values
+        return (
+            pd.Series(x).rolling(window, min_periods=1).apply(lambda y: y.iloc[-1], raw=True).values
+        )
 
 
 # --- Time Series with Two Series ---
@@ -517,9 +532,11 @@ class Corr(TripleOp):
     def _compute(self, x: np.ndarray, y: np.ndarray, window: int) -> np.ndarray:
         result = np.full(len(x), np.nan, dtype=float)
         for i in range(window - 1, len(x)):
-            mask = ~(np.isnan(x[i - window + 1:i + 1]) | np.isnan(y[i - window + 1:i + 1]))
+            mask = ~(np.isnan(x[i - window + 1 : i + 1]) | np.isnan(y[i - window + 1 : i + 1]))
             if mask.sum() >= 3:
-                result[i] = np.corrcoef(x[i - window + 1:i + 1][mask], y[i - window + 1:i + 1][mask])[0, 1]
+                result[i] = np.corrcoef(
+                    x[i - window + 1 : i + 1][mask], y[i - window + 1 : i + 1][mask]
+                )[0, 1]
         return result
 
 
@@ -532,9 +549,11 @@ class Cov(TripleOp):
     def _compute(self, x: np.ndarray, y: np.ndarray, window: int) -> np.ndarray:
         result = np.full(len(x), np.nan, dtype=float)
         for i in range(window - 1, len(x)):
-            mask = ~(np.isnan(x[i - window + 1:i + 1]) | np.isnan(y[i - window + 1:i + 1]))
+            mask = ~(np.isnan(x[i - window + 1 : i + 1]) | np.isnan(y[i - window + 1 : i + 1]))
             if mask.sum() >= 3:
-                result[i] = np.cov(x[i - window + 1:i + 1][mask], y[i - window + 1:i + 1][mask])[0, 1]
+                result[i] = np.cov(
+                    x[i - window + 1 : i + 1][mask], y[i - window + 1 : i + 1][mask]
+                )[0, 1]
         return result
 
 
@@ -547,8 +566,8 @@ class Beta(TripleOp):
     def _compute(self, x: np.ndarray, y: np.ndarray, window: int) -> np.ndarray:
         result = np.full(len(x), np.nan, dtype=float)
         for i in range(window - 1, len(x)):
-            xi = x[i - window + 1:i + 1]
-            yi = y[i - window + 1:i + 1]
+            xi = x[i - window + 1 : i + 1]
+            yi = y[i - window + 1 : i + 1]
             mask = ~(np.isnan(xi) | np.isnan(yi))
             if mask.sum() >= 3:
                 xi_valid = xi[mask]
@@ -607,7 +626,7 @@ class TsRank(WindowOp):
     def _compute(self, x: np.ndarray, window: int) -> np.ndarray:
         result = np.full_like(x, np.nan, dtype=float)
         for i in range(window - 1, len(x)):
-            window_data = x[i - window + 1:i + 1]
+            window_data = x[i - window + 1 : i + 1]
             val = x[i]
             valid = window_data[~np.isnan(window_data)]
             if len(valid) > 0:
@@ -624,7 +643,7 @@ class TsQuantile(WindowOp):
     def _compute(self, x: np.ndarray, window: int) -> np.ndarray:
         result = np.full_like(x, np.nan, dtype=float)
         for i in range(window - 1, len(x)):
-            window_data = x[i - window + 1:i + 1]
+            window_data = x[i - window + 1 : i + 1]
             val = x[i]
             valid = window_data[~np.isnan(window_data)]
             if len(valid) > 0:
@@ -647,7 +666,7 @@ class DecayLinear(WindowOp):
         weights = weights / weights.sum()
 
         for i in range(window - 1, len(x)):
-            window_data = x[i - window + 1:i + 1]
+            window_data = x[i - window + 1 : i + 1]
             result[i] = np.nansum(window_data * weights)
         return result
 
@@ -661,7 +680,7 @@ class DecayExp(WindowOp):
     def _compute(self, x: np.ndarray, window: int, alpha: float = 0.5) -> np.ndarray:
         result = np.full_like(x, np.nan, dtype=float)
         for i in range(window - 1, len(x)):
-            window_data = x[i - window + 1:i + 1]
+            window_data = x[i - window + 1 : i + 1]
             weights = np.array([(1 - alpha) ** (window - 1 - j) for j in range(window)])
             weights = weights / weights.sum()
             result[i] = np.nansum(window_data * weights)
@@ -677,7 +696,7 @@ class WMA(WindowOp):
     def _compute(self, x: np.ndarray, window: int) -> np.ndarray:
         result = np.full_like(x, np.nan, dtype=float)
         for i in range(window - 1, len(x)):
-            window_data = x[i - window + 1:i + 1]
+            window_data = x[i - window + 1 : i + 1]
             weights = np.arange(1, window + 1, dtype=float)
             weights = weights / weights.sum()
             result[i] = np.nansum(window_data * weights)
@@ -764,7 +783,7 @@ class TsMax(WindowOp):
     def _compute(self, x: np.ndarray, window: int) -> np.ndarray:
         result = np.full_like(x, np.nan, dtype=float)
         for i in range(len(x)):
-            result[i] = np.nanmax(x[max(0, i - window + 1):i + 1])
+            result[i] = np.nanmax(x[max(0, i - window + 1) : i + 1])
         return result
 
 
@@ -777,7 +796,7 @@ class TsMin(WindowOp):
     def _compute(self, x: np.ndarray, window: int) -> np.ndarray:
         result = np.full_like(x, np.nan, dtype=float)
         for i in range(len(x)):
-            result[i] = np.nanmin(x[max(0, i - window + 1):i + 1])
+            result[i] = np.nanmin(x[max(0, i - window + 1) : i + 1])
         return result
 
 
@@ -790,7 +809,7 @@ class ArgMax(WindowOp):
     def _compute(self, x: np.ndarray, window: int) -> np.ndarray:
         result = np.full_like(x, np.nan, dtype=float)
         for i in range(window - 1, len(x)):
-            window_data = x[i - window + 1:i + 1]
+            window_data = x[i - window + 1 : i + 1]
             result[i] = np.nanargmax(window_data) + 1
         return result
 
@@ -804,7 +823,7 @@ class ArgMin(WindowOp):
     def _compute(self, x: np.ndarray, window: int) -> np.ndarray:
         result = np.full_like(x, np.nan, dtype=float)
         for i in range(window - 1, len(x)):
-            window_data = x[i - window + 1:i + 1]
+            window_data = x[i - window + 1 : i + 1]
             result[i] = np.nanargmin(window_data) + 1
         return result
 
@@ -877,7 +896,7 @@ class RollingZScore(WindowOp):
     def _compute(self, x: np.ndarray, window: int) -> np.ndarray:
         result = np.full_like(x, np.nan, dtype=float)
         for i in range(window - 1, len(x)):
-            window_data = x[i - window + 1:i + 1]
+            window_data = x[i - window + 1 : i + 1]
             w_mean = np.nanmean(window_data)
             w_std = np.nanstd(window_data)
             if w_std != 0:
@@ -913,6 +932,7 @@ class PctChange(WindowOp):
 # Operator Registry
 # =============================================================================
 
+
 class OperatorRegistry:
     """Registry of all available operators."""
 
@@ -924,26 +944,80 @@ class OperatorRegistry:
         """Register all default operators."""
         operators = [
             # Unary Math
-            Abs, Sign, Log, LogN, Sqrt, Square, Power, Exp, Tanh, Sigmoid,
-            Sin, Cos, Floor, Ceil, Round, Clip,
+            Abs,
+            Sign,
+            Log,
+            LogN,
+            Sqrt,
+            Square,
+            Power,
+            Exp,
+            Tanh,
+            Sigmoid,
+            Sin,
+            Cos,
+            Floor,
+            Ceil,
+            Round,
+            Clip,
             # Binary Math
-            Add, Sub, Mul, Div, Mod,
+            Add,
+            Sub,
+            Mul,
+            Div,
+            Mod,
             # Time Series
-            Ref, Delta, Sum, Mean, Std, Var, Max, Min, Median, Skew, Kurt,
-            Prod, Count, Sem, First, Last,
+            Ref,
+            Delta,
+            Sum,
+            Mean,
+            Std,
+            Var,
+            Max,
+            Min,
+            Median,
+            Skew,
+            Kurt,
+            Prod,
+            Count,
+            Sem,
+            First,
+            Last,
             # Two Series
-            Corr, Cov, Beta,
+            Corr,
+            Cov,
+            Beta,
             # Cross-sectional
-            Rank, Quantile, Decile,
+            Rank,
+            Quantile,
+            Decile,
             # Time Series Ranking
-            TsRank, TsQuantile,
+            TsRank,
+            TsQuantile,
             # Decay
-            DecayLinear, DecayExp, WMA, EMA, SMA,
+            DecayLinear,
+            DecayExp,
+            WMA,
+            EMA,
+            SMA,
             # Conditional
-            Iif, Where, IsNa, NotNa, FillNa,
+            Iif,
+            Where,
+            IsNa,
+            NotNa,
+            FillNa,
             # Advanced
-            TsMax, TsMin, ArgMax, ArgMin, Shift, RollingSum,
-            Scale, ZScore, RollingZScore, Return, PctChange,
+            TsMax,
+            TsMin,
+            ArgMax,
+            ArgMin,
+            Shift,
+            RollingSum,
+            Scale,
+            ZScore,
+            RollingZScore,
+            Return,
+            PctChange,
         ]
         for op in operators:
             self.register(op())
@@ -952,7 +1026,7 @@ class OperatorRegistry:
         """Register an operator instance."""
         self._operators[op.name] = type(op)
 
-    def get(self, name: str) -> Optional[type[Operator]]:
+    def get(self, name: str) -> type[Operator] | None:
         """Get operator class by name."""
         return self._operators.get(name)
 
@@ -972,13 +1046,14 @@ REGISTRY = OperatorRegistry()
 # Expression Compiler
 # =============================================================================
 
+
 class ExpressionCompiler:
     """Compile factor expressions to SQL or Pandas code."""
 
-    def __init__(self, registry: Optional[OperatorRegistry] = None):
+    def __init__(self, registry: OperatorRegistry | None = None):
         self.registry = registry or REGISTRY
 
-    def to_duckdb(self, expr: str, columns: Optional[dict[str, str]] = None) -> str:
+    def to_duckdb(self, expr: str, columns: dict[str, str] | None = None) -> str:
         """Convert expression to DuckDB SQL."""
         columns = columns or {}
         # This is a simplified compiler - full implementation would use AST parsing
@@ -986,7 +1061,8 @@ class ExpressionCompiler:
 
         # Replace $column with actual column names
         import re
-        result = re.sub(r'\$(\w+)', lambda m: columns.get(m.group(1), m.group(1)), result)
+
+        result = re.sub(r"\$(\w+)", lambda m: columns.get(m.group(1), m.group(1)), result)
 
         return result
 
@@ -995,14 +1071,6 @@ class ExpressionCompiler:
         result = expr
 
         # Replace operators with pandas equivalents
-        replacements = {
-            'Ref(': 'shift(',
-            'Mean(': 'rolling(window=',
-            'Sum(': 'rolling(window=',
-            'Std(': 'rolling(window=',
-            'Max(': 'rolling(window=',
-            'Min(': 'rolling(window=',
-        }
 
         return result
 
@@ -1010,6 +1078,7 @@ class ExpressionCompiler:
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
 
 def rolling_mean(x: np.ndarray, window: int) -> np.ndarray:
     """Calculate rolling mean."""
@@ -1025,7 +1094,7 @@ def ts_rank(x: np.ndarray, window: int) -> np.ndarray:
     """Calculate time series rank."""
     result = np.full_like(x, np.nan, dtype=float)
     for i in range(window - 1, len(x)):
-        window_data = x[i - window + 1:i + 1]
+        window_data = x[i - window + 1 : i + 1]
         val = x[i]
         valid = window_data[~np.isnan(window_data)]
         if len(valid) > 0:
@@ -1037,9 +1106,11 @@ def ts_corr(x: np.ndarray, y: np.ndarray, window: int) -> np.ndarray:
     """Calculate time series correlation."""
     result = np.full(len(x), np.nan, dtype=float)
     for i in range(window - 1, len(x)):
-        mask = ~(np.isnan(x[i - window + 1:i + 1]) | np.isnan(y[i - window + 1:i + 1]))
+        mask = ~(np.isnan(x[i - window + 1 : i + 1]) | np.isnan(y[i - window + 1 : i + 1]))
         if mask.sum() >= 3:
-            result[i] = np.corrcoef(x[i - window + 1:i + 1][mask], y[i - window + 1:i + 1][mask])[0, 1]
+            result[i] = np.corrcoef(
+                x[i - window + 1 : i + 1][mask], y[i - window + 1 : i + 1][mask]
+            )[0, 1]
     return result
 
 
@@ -1065,7 +1136,7 @@ def decay_linear(x: np.ndarray, window: int) -> np.ndarray:
     weights = weights / weights.sum()
 
     for i in range(window - 1, len(x)):
-        window_data = x[i - window + 1:i + 1]
+        window_data = x[i - window + 1 : i + 1]
         result[i] = np.nansum(window_data * weights)
     return result
 
@@ -1086,19 +1157,78 @@ __all__ = [
     "TripleOp",
     "ExpressionCompiler",
     # Operators
-    "Abs", "Sign", "Log", "LogN", "Sqrt", "Square", "Power", "Exp",
-    "Tanh", "Sigmoid", "Sin", "Cos", "Floor", "Ceil", "Round", "Clip",
-    "Add", "Sub", "Mul", "Div", "Mod",
-    "Ref", "Delta", "Sum", "Mean", "Std", "Var", "Max", "Min", "Median",
-    "Skew", "Kurt", "Prod", "Count", "Sem", "First", "Last",
-    "Corr", "Cov", "Beta",
-    "Rank", "Quantile", "Decile",
-    "TsRank", "TsQuantile",
-    "DecayLinear", "DecayExp", "WMA", "EMA", "SMA",
-    "Iif", "Where", "IsNa", "NotNa", "FillNa",
-    "TsMax", "TsMin", "ArgMax", "ArgMin", "Shift", "RollingSum",
-    "Scale", "ZScore", "RollingZScore", "Return", "PctChange",
+    "Abs",
+    "Sign",
+    "Log",
+    "LogN",
+    "Sqrt",
+    "Square",
+    "Power",
+    "Exp",
+    "Tanh",
+    "Sigmoid",
+    "Sin",
+    "Cos",
+    "Floor",
+    "Ceil",
+    "Round",
+    "Clip",
+    "Add",
+    "Sub",
+    "Mul",
+    "Div",
+    "Mod",
+    "Ref",
+    "Delta",
+    "Sum",
+    "Mean",
+    "Std",
+    "Var",
+    "Max",
+    "Min",
+    "Median",
+    "Skew",
+    "Kurt",
+    "Prod",
+    "Count",
+    "Sem",
+    "First",
+    "Last",
+    "Corr",
+    "Cov",
+    "Beta",
+    "Rank",
+    "Quantile",
+    "Decile",
+    "TsRank",
+    "TsQuantile",
+    "DecayLinear",
+    "DecayExp",
+    "WMA",
+    "EMA",
+    "SMA",
+    "Iif",
+    "Where",
+    "IsNa",
+    "NotNa",
+    "FillNa",
+    "TsMax",
+    "TsMin",
+    "ArgMax",
+    "ArgMin",
+    "Shift",
+    "RollingSum",
+    "Scale",
+    "ZScore",
+    "RollingZScore",
+    "Return",
+    "PctChange",
     # Helpers
-    "rolling_mean", "rolling_std", "ts_rank", "ts_corr", "cs_rank",
-    "cs_zscore", "decay_linear",
+    "rolling_mean",
+    "rolling_std",
+    "ts_rank",
+    "ts_corr",
+    "cs_rank",
+    "cs_zscore",
+    "decay_linear",
 ]

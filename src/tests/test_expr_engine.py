@@ -1,21 +1,28 @@
 """Tests for Qlib Expression Engine — tokenizer, parser, SQL compiler, Pandas compiler."""
 
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'factors'))
+import os
+import sys
+
+# sys.path already configured in conftest.py
 
 import numpy as np
 import pandas as pd
 import pytest
-
-from expr_engine import (
-    tokenize, parse, compile_sql, compute_pandas,
-    ExprEngine, TT, ASTNode, NodeKind, SQLCompiler, PandasCompiler,
+from factor_pipeline.factors.expr_engine import (
+    TT,
+    ExprEngine,
+    NodeKind,
+    SQLCompiler,
+    compile_sql,
+    compute_pandas,
+    parse,
+    tokenize,
 )
-
 
 # =============================================================================
 # Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def sample_df():
@@ -26,16 +33,25 @@ def sample_df():
     for d in dates:
         for j, sym in enumerate(symbols):
             base = 100 if j == 0 else 50
-            i = (d - dates[0]).days // 7  # rough day index within series
+            (d - dates[0]).days // 7  # rough day index within series
             o = base + int((d - dates[0]).days / 7)
             h = o + 2
             l = o - 1
             c = o + 1
             v = 1000 * (list(dates).index(d) + 1)
             a = c * v
-            rows.append({"date": d, "symbol": sym,
-                         "open": o, "high": h, "low": l, "close": c,
-                         "volume": v, "amount": a})
+            rows.append(
+                {
+                    "date": d,
+                    "symbol": sym,
+                    "open": o,
+                    "high": h,
+                    "low": l,
+                    "close": c,
+                    "volume": v,
+                    "amount": a,
+                }
+            )
     return pd.DataFrame(rows)
 
 
@@ -47,6 +63,7 @@ def engine():
 # =============================================================================
 # Tokenizer tests
 # =============================================================================
+
 
 class TestTokenizer:
     def test_simple_expr(self):
@@ -81,6 +98,7 @@ class TestTokenizer:
 # =============================================================================
 # Parser tests
 # =============================================================================
+
 
 class TestParser:
     def test_column(self):
@@ -135,6 +153,7 @@ class TestParser:
 # =============================================================================
 # SQL Compiler tests
 # =============================================================================
+
 
 class TestSQLCompiler:
     def test_column(self):
@@ -215,6 +234,7 @@ class TestSQLCompiler:
 # Pandas Compiler tests
 # =============================================================================
 
+
 class TestPandasCompiler:
     def test_column(self, sample_df):
         result = compute_pandas(sample_df, "$close")
@@ -284,6 +304,7 @@ class TestPandasCompiler:
 # ExprEngine tests
 # =============================================================================
 
+
 class TestExprEngine:
     def test_explain(self, engine):
         info = engine.explain("($close - $high) / $close")
@@ -296,15 +317,13 @@ class TestExprEngine:
 # Edge cases
 # =============================================================================
 
+
 class TestUniverseFilter:
     """Test universe filtering for stock pool membership."""
 
     def test_universe_sql_generation(self):
         """Test that universe filter generates correct SQL."""
-        compiler = SQLCompiler(
-            universe="csi500",
-            instruments_db="/path/to/quantdb.duckdb"
-        )
+        compiler = SQLCompiler(universe="csi500", instruments_db="/path/to/quantdb.duckdb")
 
         # Check that ATTACH statement is generated
         ast = parse("Mean($close, 5)")
