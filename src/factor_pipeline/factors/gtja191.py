@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from factors.base import FactorABC, FactorResult
-from factors.registry import register_factor
+from factor_pipeline.factors.base import FactorABC, FactorResult
+from factor_pipeline.factors.registry import register_factor
 
 
 # ---------------------------------------------------------------------------

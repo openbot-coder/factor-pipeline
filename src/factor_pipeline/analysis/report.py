@@ -15,8 +15,8 @@ import pandas as pd
 import seaborn as sns
 from jinja2 import Environment, FileSystemLoader
 
-from analysis.ic import ICAnalysis
-from analysis.layered import LayeredBacktest
+from factor_pipeline.analysis.ic import ICAnalysis
+from factor_pipeline.analysis.layered import LayeredBacktest
 
 sns.set_theme(style="whitegrid", font_scale=0.8)
 

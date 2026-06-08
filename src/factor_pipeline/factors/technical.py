@@ -3,7 +3,7 @@
 from __future__ import annotations
 import pandas as pd
 import ta
-from factors.registry import register_factor
+from factor_pipeline.factors.registry import register_factor
 
 
 @register_factor

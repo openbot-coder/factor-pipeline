@@ -6,7 +6,7 @@ import inspect
 from collections import OrderedDict
 from typing import Callable, Optional
 
-from factors.base import FactorABC, FactorResult
+from factor_pipeline.factors.base import FactorABC, FactorResult
 
 # ---------------------------------------------------------------------------
 # global registry

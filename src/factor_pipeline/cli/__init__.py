@@ -49,7 +49,7 @@ import click
 # Import from factor_pipeline package
 from factor_pipeline import __version__
 
-from data.storage import DuckDBStorage
+from factor_pipeline.data.storage import DuckDBStorage
 
 
 # =============================================================================
@@ -321,7 +321,7 @@ def factor_group():
 @factor_group.command("list")
 def factor_list():
     """List all available factors."""
-    from factors.registry import FactorRegistry
+    from factor_pipeline.factors.registry import FactorRegistry
     import importlib
 
     # Load factor modules
@@ -353,7 +353,7 @@ def factor_list():
 @click.argument("factor_name")
 def factor_doc(factor_name: str):
     """Show factor documentation."""
-    from factors.registry import FactorRegistry
+    from factor_pipeline.factors.registry import FactorRegistry
 
     f = FactorRegistry.get(factor_name)
     if not f:
@@ -377,7 +377,7 @@ def factor_doc(factor_name: str):
 def factor_run(expression: str, db: str, start: Optional[str], end: Optional[str],
                 symbols: Optional[str], output: Optional[str]):
     """Run a factor expression."""
-    from factors.expr_engine import ExprEngine
+    from factor_pipeline.factors.expr_engine import ExprEngine
 
     storage = get_db(db)
 
@@ -404,7 +404,7 @@ def factor_run(expression: str, db: str, start: Optional[str], end: Optional[str
 @click.option("--output", "-o", default="results/", help="Output directory")
 def factor_batch(file_path: str, db: str, start: Optional[str], end: Optional[str], output: str):
     """Run multiple factors from a file (one expression per line)."""
-    from factors.expr_engine import ExprEngine
+    from factor_pipeline.factors.expr_engine import ExprEngine
 
     storage = get_db(db)
     engine = ExprEngine(db)
@@ -450,8 +450,8 @@ def backtest_group():
 def backtest_run(factors: str, db: str, start: str, end: str, output: str):
     """Run backtest for factors."""
     import pandas as pd
-    from analysis.ic import ICAnalysis
-    from analysis.layered import LayeredBacktest
+    from factor_pipeline.analysis.ic import ICAnalysis
+    from factor_pipeline.analysis.layered import LayeredBacktest
 
     storage = get_db(db)
 
@@ -470,7 +470,7 @@ def backtest_run(factors: str, db: str, start: str, end: str, output: str):
 
         try:
             # Get factor values
-            from factors.registry import FactorRegistry
+            from factor_pipeline.factors.registry import FactorRegistry
             factor = FactorRegistry.get(factor_name)
             if factor:
                 data = storage.get_ohlcv(start_date=start, end_date=end)
@@ -504,7 +504,7 @@ def backtest_run(factors: str, db: str, start: str, end: str, output: str):
 @click.option("--output", "-o", help="Output HTML file")
 def backtest_ic(factor: str, db: str, start: str, end: str, output: Optional[str]):
     """Run IC analysis for a factor."""
-    from analysis.ic import ICAnalysis
+    from factor_pipeline.analysis.ic import ICAnalysis
 
     storage = get_db(db)
 
@@ -512,7 +512,7 @@ def backtest_ic(factor: str, db: str, start: str, end: str, output: Optional[str
 
     try:
         # Get factor data
-        from factors.registry import FactorRegistry
+        from factor_pipeline.factors.registry import FactorRegistry
         factor_obj = FactorRegistry.get(factor)
         if not factor_obj:
             echo_error(f"Factor not found: {factor}")
@@ -550,14 +550,14 @@ def backtest_ic(factor: str, db: str, start: str, end: str, output: Optional[str
 def backtest_layered(factor: str, db: str, start: str, end: str,
                      n_quintiles: int, output: Optional[str]):
     """Run layered backtest for a factor."""
-    from analysis.layered import LayeredBacktest
+    from factor_pipeline.analysis.layered import LayeredBacktest
 
     storage = get_db(db)
 
     echo_header(f"Layered Backtest: {factor}")
 
     try:
-        from factors.registry import FactorRegistry
+        from factor_pipeline.factors.registry import FactorRegistry
         factor_obj = FactorRegistry.get(factor)
         if not factor_obj:
             echo_error(f"Factor not found: {factor}")
@@ -600,7 +600,7 @@ def report_group():
 @click.option("--output", "-o", default="report.html", help="Output HTML file")
 def report_generate(factors: str, db: str, start: str, end: str, output: str):
     """Generate HTML report for factors."""
-    from analysis.report import HTMLReportGenerator
+    from factor_pipeline.analysis.report import HTMLReportGenerator
 
     storage = get_db(db)
     factor_list = [f.strip() for f in factors.split(",")]
