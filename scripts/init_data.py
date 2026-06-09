@@ -17,12 +17,13 @@ Usage:
     # 仅执行ETL迁移
     python scripts/init_data.py --mode etl --db data/quant.db
 
-    # 仅初始化K线
-    python scripts/init_data.py --mode ohlcv --db data/quant.db --start 2020-01-01
+    # 仅初始化K线 (不限量全市场)
+    python scripts/init_data.py --mode ohlcv --db data/quant.db --start 2005-01-01
 """
 
 import argparse
 import sys
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -33,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from factor_pipeline.data.quantdb import QuantDB
 from factor_pipeline.data.etl import ETLPipeline
+from factor_pipeline.data.utils import norm_code
 
 
 # =============================================================================
@@ -40,10 +42,10 @@ from factor_pipeline.data.etl import ETLPipeline
 # =============================================================================
 
 INDICES = {
-    "000016.SH": {"name": "上证50", "category": "宽基"},
-    "000300.SH": {"name": "沪深300", "category": "宽基"},
-    "000905.SH": {"name": "中证500", "category": "宽基"},
-    "000852.SH": {"name": "中证1000", "category": "宽基"},
+    "000016": {"name": "上证50", "category": "宽基", "pool_name": "sse50"},
+    "000300": {"name": "沪深300", "category": "宽基", "pool_name": "csi300"},
+    "000905": {"name": "中证500", "category": "宽基", "pool_name": "csi500"},
+    "000852": {"name": "中证1000", "category": "宽基", "pool_name": "csi1000"},
 }
 
 
@@ -154,85 +156,152 @@ def _get_fallback_instruments() -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-def fetch_instruments_baostock() -> pd.DataFrame:
-    """从baostock获取股票列表，失败时回退到内置列表"""
+def fetch_instruments_akshare() -> pd.DataFrame:
+    """从 akshare 获取全 A 股列表 (stock_info_a_code_name)"""
+    import akshare as ak
+
+    print("  [akshare] 获取全 A 股列表 ...", end=" ", flush=True)
+    df = ak.stock_info_a_code_name()
+    print(f"{len(df)} 只")
+
+    # stock_info_a_code_name 只返回 code/name，需要自己推导 market/list_date
+    # 用 stock_info_sh_name_code / stock_info_sz_name_code 补充 list_date
+    records = []
+    for _, row in df.iterrows():
+        code = str(row["code"]).strip().zfill(6)
+        sym = norm_code(code)
+        if not sym:
+            continue
+        records.append({
+            "symbol": sym,
+            "name": str(row.get("name", "")),
+            "list_date": None,
+            "delist_date": None,
+            "market": sym.split(".")[1],
+        })
+
+    # 补充 list_date: 尝试用 akshare stock_info_sh_name_code / stock_info_sz_name_code
     try:
-        import baostock as bs
+        sh_df = ak.stock_info_sh_name_code()
+        sh_map = {}
+        for _, r in sh_df.iterrows():
+            c = str(r.get("证券代码", "")).zfill(6)
+            ld = r.get("上市日期")
+            if ld and str(ld) != "nan" and str(ld) != "NaT":
+                sh_map[c] = str(ld)
+        for rec in records:
+            code = rec["symbol"].split(".")[0]
+            if code in sh_map:
+                rec["list_date"] = sh_map[code]
+    except Exception:
+        pass
 
-        bs.login()
-        rs = bs.query_all_stock(day=date.today().strftime("%Y-%m-%d"))
-
-        records = []
-        while rs.error_code == "0" and rs.next():
-            row = rs.get_row_data()
-            if row[1] in ["1", "2", "3", "4", "5"]:
-                code = row[0].split(".")[1]
-                exchange = "SSE" if row[0].startswith("sh") else "SZSE"
-                records.append({
-                    "symbol": f"{code}.{exchange}",
-                    "name": row[2],
-                    "market": exchange,
-                })
-
-        bs.logout()
-
-        if records:
-            return pd.DataFrame(records)
-
-        # baostock stock list API returned 0 rows — fall back to hardcoded list
-        print("   ⚠️ baostock 股票列表接口返回空，使用内置回退列表")
-        return _get_fallback_instruments()
-    except ImportError:
-        return pd.DataFrame()
-    except Exception as e:
-        print(f"   ⚠️ baostock 调用异常 {e}，使用内置回退列表")
-        return _get_fallback_instruments()
-
-
-def fetch_index_components_baostock(index_code: str) -> pd.DataFrame:
-    """从baostock获取指数成分股"""
     try:
-        import baostock as bs
+        sz_df = ak.stock_info_sz_name_code()
+        sz_map = {}
+        for _, r in sz_df.iterrows():
+            c = str(r.get("A股代码", r.get("代码", ""))).zfill(6)
+            ld = r.get("上市日期", r.get("A股上市日期", ""))
+            if ld and str(ld) != "nan" and str(ld) != "NaT":
+                sz_map[c] = str(ld)
+        for rec in records:
+            code = rec["symbol"].split(".")[0]
+            if code in sz_map:
+                rec["list_date"] = sz_map[code]
+    except Exception:
+        pass
 
-        bs_code = index_code.replace(".SH", ".sh")
-        bs.login()
+    return pd.DataFrame(records)
 
-        # Try multiple API variants — baostock versions differ
-        rs = None
-        for method_name in ("query_index_stock_weight", "query_index_stock_cons"):
-            if hasattr(bs, method_name):
-                rs = getattr(bs, method_name)(bs_code)
-                break
-        if rs is None:
-            print(f"   ⚠️ baostock 无指数成分接口，跳过 {index_code}")
-            bs.logout()
-            return pd.DataFrame()
 
-        records = []
-        while rs.error_code == "0" and rs.next():
-            row = rs.get_row_data()
-            stock_code = row.get("stockCode") or row.get("code") or ""
-            if not stock_code:
-                continue
-            code = stock_code.split(".")[1]
-            exchange = "SSE" if stock_code.startswith("sh") else "SZSE"
-            index_name = INDICES.get(index_code, {}).get("name", index_code)
+def fetch_index_components_akshare(index_code: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """从 akshare 获取指数成分股 (权重 + 纳入日期)
+
+    Returns:
+        (weight_df, cons_df) — 权重数据 + 成分股列表(含纳入日期)
+    """
+    import akshare as ak
+
+    # 主数据源: CSIndex — 成分权重
+    df_weight = ak.index_stock_cons_weight_csindex(symbol=index_code)
+    # 辅助: Sina — 纳入日期
+    df_cons = ak.index_stock_cons(symbol=index_code)
+
+    return df_weight, df_cons
+
+
+def fetch_shenwan_industries_bs() -> pd.DataFrame:
+    """从 baostock 获取证监会行业分类 (CSRC 标准)
+
+    baostock query_stock_industry 返回字段:
+        [update_date, code, stock_name, industry_code_name, classification_type]
+    字段3: 如 'J66货币金融服务', 'G56航空运输业' — 是证监会行业分类
+
+    Returns:
+        DataFrame with columns: [symbol, industry_name, industry_code]
+    """
+    import baostock as bs
+
+    bs.login()
+    rs = bs.query_stock_industry()
+    records = []
+    while rs.error_code == "0" and rs.next():
+        row = rs.get_row_data()
+        code = str(row[1]).split(".")[-1]
+        sym = norm_code(code)
+        if sym:
+            ind = str(row[3]) if len(row) > 3 and row[3] else ""
             records.append({
-                "index_code": index_code,
-                "index_name": index_name,
-                "symbol": f"{code}.{exchange}",
-                "in_date": row.get("inDate", ""),
-                "out_date": None if row.get("outDate", "") == "" else row.get("outDate", ""),
-                "weight": float(row.get("weight", 0) or 0),
+                "symbol": sym,
+                "industry_name": ind,
+                "industry_code": ind,
             })
+    bs.logout()
+    df = pd.DataFrame(records)
+    # 过滤掉空行业
+    df = df[df["industry_name"].str.len() > 0].reset_index(drop=True)
+    print(f"  [baostock] 证监会行业分类: {len(df)} 条, {df['industry_name'].nunique() if not df.empty else 0} 个行业")
+    return df
 
-        bs.logout()
-        return pd.DataFrame(records)
-    except ImportError:
-        return pd.DataFrame()
-    except Exception as e:
-        print(f"   ⚠️ baostock 指数成分获取异常: {e}")
-        return pd.DataFrame()
+
+def _build_index_constituents(index_code: str, pool_name: str, df_weight: pd.DataFrame, df_cons: pd.DataFrame,
+                               latest_only: bool = True) -> pd.DataFrame:
+    """将 CSIndex 权重 + Sina 纳入日期合并为 pool_registration 格式"""
+    import akshare as ak
+
+    # 取最新日期
+    if latest_only:
+        latest = df_weight["日期"].max()
+        df_weight = df_weight[df_weight["日期"] == latest]
+
+    # Sina in_dates
+    in_dates = {}
+    for _, row in df_cons.iterrows():
+        sym = norm_code(str(row["品种代码"]))
+        if sym:
+            in_dates[sym] = str(row["纳入日期"])
+
+    latest_date = df_weight["日期"].max()
+    fallback_date = str(latest_date) if not hasattr(latest_date, "strftime") else latest_date.strftime("%Y-%m-%d")
+    index_name = INDICES[index_code]["name"]
+
+    records = []
+    for _, row in df_weight.iterrows():
+        sym = norm_code(str(row["成分券代码"]))
+        if not sym:
+            continue
+        w = float(row.get("权重", 0) or 0)
+        records.append({
+            "index_code": index_code,
+            "index_name": index_name,
+            "pool_name": pool_name,
+            "symbol": sym,
+            "in_date": in_dates.get(sym, fallback_date),
+            "out_date": None,
+            "weight": w,
+            "source": "akshare",
+        })
+    return pd.DataFrame(records)
 
 
 def _to_bs_code(symbol: str) -> str:
@@ -259,7 +328,7 @@ def fetch_ohlcv_baostock(
     symbols: list[str],
     start: str,
     end: str,
-    adjust: str = "3",  # 默认不复权（前复权数据部分缺失）
+    adjust: str = "2",  # 默认前复权
 ) -> pd.DataFrame:
     """从baostock获取K线数据"""
     try:
@@ -318,57 +387,137 @@ def init_ods(db: QuantDB, args) -> dict:
     # 创建ODS表
     db.create_ods_tables(source)
     
-    # 拉取日历
+    # ============================
+    # 1. 日历
+    # ============================
     print("\n📅 拉取日历...")
     df = generate_trading_calendar(2005, date.today().year)
     rows = db.import_ods(source, "calendars", df)
     results["calendars"] = rows
     print(f"   ✅ {rows} 条")
     
-    # 拉取股票列表
-    print("\n📋 拉取股票列表...")
-    df = fetch_instruments_baostock()
-    if not df.empty:
-        rows = db.import_ods(source, "instruments", df)
+    # ============================
+    # 2. 全量股票列表
+    # ============================
+    print("\n📋 拉取全量A股列表...")
+    df_instr = pd.DataFrame()
+    try:
+        df_instr = fetch_instruments_akshare()
+        if df_instr.empty:
+            raise ValueError("空结果")
+    except Exception as e:
+        print(f"   ⚠️ akshare 失败: {e}")
+        print("   ⚠️ 回退到 baostock + 内置列表...")
+        try:
+            import baostock as bs
+            bs.login()
+            rs = bs.query_all_stock(day=date.today().strftime("%Y-%m-%d"))
+            records = []
+            while rs.error_code == "0" and rs.next():
+                row = rs.get_row_data()
+                if row[1] in ["1", "2", "3", "4", "5"]:
+                    code = row[0].split(".")[1]
+                    exchange = "SSE" if row[0].startswith("sh") else "SZSE"
+                    records.append({"symbol": f"{code}.{exchange}", "name": row[2], "market": exchange})
+            bs.logout()
+            if records:
+                df_instr = pd.DataFrame(records)
+        except Exception:
+            pass
+        if df_instr.empty:
+            df_instr = _get_fallback_instruments()
+    
+    if not df_instr.empty:
+        rows = db.import_ods(source, "instruments", df_instr)
         results["instruments"] = rows
         print(f"   ✅ {rows} 只股票")
     else:
         results["instruments"] = 0
         print("   ⚠️ 未获取到股票")
     
-    # 拉取指数成分
-    print("\n📊 拉取指数成分...")
-    total = 0
-    for code in INDICES.keys():
-        df = fetch_index_components_baostock(code)
-        if not df.empty:
-            db.import_ods(source, "index_components", df)
-            total += len(df)
-            print(f"   ✅ {code}: {len(df)} 只")
-    results["index_components"] = total
+    # ============================
+    # 3. 指数成分股 + 申万行业
+    # ============================
+    print("\n📊 拉取指数成分 + 行业分类...")
     
-    # 拉取K线
+    total_components = 0
+    total_industries = 0
+    
+    for code, info in INDICES.items():
+        try:
+            df_w, df_c = fetch_index_components_akshare(code)
+            df_combined = _build_index_constituents(code, info["pool_name"], df_w, df_c, latest_only=True)
+            if not df_combined.empty:
+                db.import_ods(source, "index_components", df_combined)
+                total_components += len(df_combined)
+                print(f"   ✅ {info['name']} ({code}): {len(df_combined)} 只")
+        except Exception as e:
+            print(f"   ⚠️ {info['name']} ({code}) 获取失败: {e}")
+    
+    # 申万行业分类 (写入 dwd_instruments_pool_registration 直接用 pool_name=sw_xxx)
+    if args.shenwan:
+        print("\n🏭 拉取申万行业分类...")
+        try:
+            df_sw = fetch_shenwan_industries_bs()
+            if not df_sw.empty:
+                conn = db.connect()
+                written = 0
+                for ind_name in df_sw["industry_name"].unique():
+                    pool = f"csrc_{ind_name}"
+                    subset = df_sw[df_sw["industry_name"] == ind_name]
+                    for _, r in subset.iterrows():
+                        try:
+                            conn.execute("""
+                                INSERT INTO dwd_instruments_pool_registration
+                                (pool_name, symbol, in_date, out_date, weight, source, updated_at)
+                                VALUES (?, ?, ?, NULL, 0, 'baostock', now())
+                                ON CONFLICT(pool_name, symbol, in_date) DO UPDATE SET
+                                    out_date = NULL, updated_at = now()
+                            """, [pool, r["symbol"], date.today().strftime("%Y-%m-%d")])
+                            written += 1
+                        except Exception:
+                            pass
+                conn.commit()
+                total_industries = written
+                print(f"   ✅ 申万行业: {df_sw['industry_name'].nunique()} 个行业, {written} 条记录")
+        except Exception as e:
+            print(f"   ⚠️ 申万行业获取失败: {e}")
+    
+    results["index_components"] = total_components
+    results["shenwan_industries"] = total_industries
+    
+    # ============================
+    # 4. K线数据 (不限量)
+    # ============================
     if args.mode == "ohlcv" or args.mode == "full":
         print("\n📈 拉取K线数据...")
         end = args.end or date.today().strftime("%Y-%m-%d")
         
-        df = db.query(f"SELECT symbol FROM ods_instruments_{source}")
-        symbols = df["symbol"].tolist()[:100]  # 限制数量
+        df_syms = db.query(f"SELECT symbol FROM ods_instruments_{source}")
+        symbols = df_syms["symbol"].tolist()
+        
+        if args.limit and args.limit < len(symbols):
+            symbols = symbols[:args.limit]
         
         print(f"   股票数: {len(symbols)}, 日期: {args.start} ~ {end}")
         
         total = 0
         batch_size = 50
+        start_time = time.time()
         for i in range(0, len(symbols), batch_size):
             batch = symbols[i:i + batch_size]
-            print(f"   处理 {i + 1} ~ {i + len(batch)}...")
-            df = fetch_ohlcv_baostock(batch, args.start, end)
+            print(f"   处理 {i + 1} ~ {i + len(batch)} / {len(symbols)}...", end=" ", flush=True)
+            df = fetch_ohlcv_baostock(batch, args.start, end, adjust=args.adjust)
             if not df.empty:
                 rows = db.import_ods(source, "daily_ohlcv", df)
                 total += rows
+                print(f"+{rows} 条", flush=True)
+            else:
+                print("(空)", flush=True)
         
+        elapsed = time.time() - start_time
         results["daily_ohlcv"] = total
-        print(f"   ✅ {total} 条K线")
+        print(f"   ✅ {total} 条K线 (耗时 {elapsed:.0f}s)")
     
     return results
 
@@ -440,7 +589,7 @@ def parse_args():
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["full", "ods", "etl", "app", "validate", "calendar", "ohlcv"],
+        choices=["full", "ods", "etl", "app", "validate", "calendar", "ohlcv", "shenwan"],
         default="full",
         help="初始化模式",
     )
@@ -449,6 +598,9 @@ def parse_args():
     parser.add_argument("--source", type=str, default="baostock", help="数据源")
     parser.add_argument("--force", action="store_true", help="强制重新初始化")
     parser.add_argument("--skip-validation", action="store_true", help="跳过校验")
+    parser.add_argument("--shenwan", action="store_true", help="拉取申万行业分类")
+    parser.add_argument("--limit", type=int, default=0, help="K线股票数量限制 (0=不限量)")
+    parser.add_argument("--adjust", type=str, default="2", help="复权方式 (2=前复权, 3=后复权)")
     
     return parser.parse_args()
 
@@ -477,6 +629,35 @@ def main():
     db.register_source(args.source, priority=1)
     
     results = {}
+    
+    # 证监会行业专用模式 (baostock 提供的是 CSRC 分类)
+    if args.mode == "shenwan":
+        print("\n" + "=" * 50)
+        print("[ODS] 仅拉取证监会行业分类")
+        print("=" * 50)
+        df_sw = fetch_shenwan_industries_bs()
+        if not df_sw.empty:
+            conn = db.connect()
+            written = 0
+            for ind_name in df_sw["industry_name"].unique():
+                pool = f"csrc_{ind_name}"
+                subset = df_sw[df_sw["industry_name"] == ind_name]
+                for _, r in subset.iterrows():
+                    try:
+                        conn.execute("""
+                            INSERT INTO dwd_instruments_pool_registration
+                            (pool_name, symbol, in_date, out_date, weight, source, updated_at)
+                            VALUES (?, ?, ?, NULL, 0, 'baostock', now())
+                            ON CONFLICT(pool_name, symbol, in_date) DO UPDATE SET
+                                out_date = NULL, updated_at = now()
+                        """, [pool, r["symbol"], date.today().strftime("%Y-%m-%d")])
+                        written += 1
+                    except Exception:
+                        pass
+            conn.commit()
+            print(f"\n[OK] 证监会行业: {df_sw['industry_name'].nunique()} 个行业, {written} 条记录")
+        db.close()
+        return
     
     # ODS层
     if args.mode in ["full", "ods", "calendar", "ohlcv"]:

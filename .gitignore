@@ -14,6 +14,7 @@ data/*.duckdb
 .env
 .idea/
 .vscode/
+.codebuddy/
 *.swp
 *.swo
 
@@ -23,6 +24,11 @@ qlib_demo/
 reports_csi500/
 reports/
 *.duckdb
+*.duckdb.wal
+*.db
+*.db.wal
+*.wal
+temp_*.csv
 
 # OS files
 .DS_Store

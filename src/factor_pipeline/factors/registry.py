@@ -13,7 +13,7 @@ from typing import Callable
 _REGISTRY: dict[str, Callable] = OrderedDict()
 
 
-def register_factor(func: Callable = None, *, name: str = None):
+def register_factor(*, name: str = None):
     """Decorator to register a factor function/class.
 
     Usage:
@@ -22,6 +22,10 @@ def register_factor(func: Callable = None, *, name: str = None):
 
         @register_factor(name="my_custom_vwap")
         def some_factor(data): ...
+
+    Note:
+        The first argument must NOT be a positional argument.
+        ``@register_factor("name")`` is invalid — use ``@register_factor(name="name")`` instead.
     """
 
     def _decorator(fn: Callable):
@@ -31,8 +35,6 @@ def register_factor(func: Callable = None, *, name: str = None):
         _REGISTRY[fn_name] = fn
         return fn
 
-    if func:
-        return _decorator(func)
     return _decorator
 
 

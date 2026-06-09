@@ -41,10 +41,11 @@ from __future__ import annotations
 
 import os
 import sys
-from pathlib import Path
+from glob import glob
 from typing import Optional
 
 import click
+import pandas as pd
 
 # Import from factor_pipeline package
 from factor_pipeline import __version__
@@ -83,6 +84,19 @@ def echo_error(text: str) -> None:
 def echo_info(text: str) -> None:
     """Print info message."""
     click.echo(f"ℹ️  {text}")
+
+
+def print_table_info(tables: list[dict]) -> None:
+    """Print table schema in formatted style."""
+    current_table = None
+    for col in tables:
+        if col["table_name"] != current_table:
+            if current_table is not None:
+                click.echo("")
+            current_table = col["table_name"]
+            click.echo(f"📋 {current_table}:")
+        nullable = "NULL" if col["is_nullable"] == "YES" else "NOT NULL"
+        click.echo(f"   {col['column_name']:20} {col['column_type']:15} {nullable}")
 
 
 def get_db(db_path: str | None = None) -> DuckDBStorage:
@@ -129,7 +143,8 @@ def data_init(db: str, force: bool):
 
 @data_group.command("info")
 @click.option("--db", default=DEFAULT_DB, help="Database path")
-def data_info(db: str):
+@click.option("--schema", is_flag=True, help="Show table schemas")
+def data_info(db: str, schema: bool):
     """Show database information."""
     storage = get_db(db)
     info = storage.info()
@@ -147,6 +162,11 @@ def data_info(db: str):
     for table, stats in info["tables"].items():
         click.echo(f"   {table:20} {stats['rows']:>10,} rows")
 
+    if schema:
+        click.echo()
+        tables = storage.show_schema()
+        print_table_info(tables)
+
 
 @data_group.command("import")
 @click.argument("csv_path", type=click.Path(exists=True))
@@ -155,6 +175,8 @@ def data_info(db: str):
 @click.option("--date-col", default="date", help="Date column name")
 @click.option("--symbol-col", default="symbol", help="Symbol column name")
 @click.option("--if-exists", default="append", type=click.Choice(["append", "replace", "fail"]))
+@click.option("--skip-rows", default=0, help="Number of rows to skip")
+@click.option("--encoding", default="utf-8", help="File encoding")
 @click.option("--preview/--no-preview", default=True, help="Show preview before import")
 def data_import(
     csv_path: str,
@@ -163,16 +185,16 @@ def data_import(
     date_col: str,
     symbol_col: str,
     if_exists: str,
+    skip_rows: int,
+    encoding: str,
     preview: bool,
 ):
     """Import CSV file into database."""
-    import pandas as pd
-
     storage = get_db(db)
 
     # Preview
     if preview:
-        df = pd.read_csv(csv_path, nrows=5)
+        df = pd.read_csv(csv_path, nrows=5, encoding=encoding, skiprows=skip_rows)
         echo_header(f"Preview: {os.path.basename(csv_path)}")
         click.echo(f"Columns: {', '.join(df.columns.tolist())}")
         click.echo("\nFirst 5 rows:")
@@ -187,6 +209,7 @@ def data_import(
             date_col=date_col,
             symbol_col=symbol_col,
             if_exists=if_exists,
+            skiprows=skip_rows,
         )
         echo_success(f"Imported {rows:,} rows into '{table}'")
     except Exception as e:
@@ -308,6 +331,124 @@ def data_export(sql: str, db: str, output: str, fmt: str):
         echo_success(f"Exported to {output}")
     except Exception as e:
         echo_error(f"Export failed: {e}")
+        sys.exit(1)
+
+
+@data_group.command("schema")
+@click.argument("table")
+@click.option("--db", default=DEFAULT_DB, help="Database path")
+def data_schema(table: str, db: str):
+    """Show table schema."""
+    try:
+        storage = get_db(db)
+        result = storage.query(f"DESCRIBE {table}")
+        click.echo(f"\n📋 Schema for '{table}':\n")
+        click.echo(result.to_string(index=False))
+        click.echo()
+    except Exception as e:
+        echo_error(f"Error: {e}")
+        sys.exit(1)
+
+
+@data_group.command("import-dir")
+@click.argument("dir_path", type=click.Path(exists=True))
+@click.option("--db", default=DEFAULT_DB, help="Database path")
+@click.option("--table", required=True, help="Target table name")
+@click.option("--pattern", default="*.csv", help="File pattern to match")
+@click.option("--recursive", is_flag=True, help="Search recursively")
+def data_import_dir(dir_path: str, db: str, table: str, pattern: str, recursive: bool):
+    """Import all CSV files from directory."""
+    try:
+        if recursive:
+            files = glob(os.path.join(dir_path, "**", pattern), recursive=True)
+        else:
+            files = glob(os.path.join(dir_path, pattern))
+
+        if not files:
+            click.echo(f"⚠️  No files found matching '{pattern}' in '{dir_path}'")
+            return
+
+        click.echo(f"📥 Found {len(files)} files to import...")
+        storage = get_db(db)
+        total_rows = 0
+
+        for f in files:
+            click.echo(f"   Importing {os.path.basename(f)}...")
+            rows = storage.import_csv(f, table=table)
+            total_rows += rows
+
+        echo_success(f"Imported {total_rows:,} rows from {len(files)} files!")
+    except Exception as e:
+        echo_error(f"Error: {e}")
+        sys.exit(1)
+
+
+@data_group.command("calendar")
+@click.option("--db", default=DEFAULT_DB, help="Database path")
+@click.option("--start", help="Start date (YYYY-MM-DD)")
+@click.option("--end", help="End date (YYYY-MM-DD)")
+@click.option("--output", "-o", help="Output file path")
+def data_calendar(db: str, start: str | None, end: str | None, output: str | None):
+    """Show trading calendar."""
+    try:
+        storage = get_db(db)
+        dates = storage.get_calendar(start, end)
+
+        if output:
+            df = pd.DataFrame({"date": dates})
+            df.to_csv(output, index=False)
+            echo_success(f"Exported {len(dates)} dates to {output}")
+        else:
+            click.echo(f"\n📅 Trading Calendar ({len(dates)} days):\n")
+            for d in dates[:10]:
+                click.echo(f"   {d}")
+            if len(dates) > 10:
+                click.echo(f"   ... ({len(dates) - 10} more)")
+    except Exception as e:
+        echo_error(f"Error: {e}")
+        sys.exit(1)
+
+
+@data_group.command("drop")
+@click.argument("table")
+@click.option("--db", default=DEFAULT_DB, help="Database path")
+@click.confirmation_option(prompt="Are you sure you want to drop the table?")
+def data_drop(table: str, db: str):
+    """Drop a table."""
+    try:
+        storage = get_db(db)
+        storage.drop_table(table)
+        echo_success(f"Table '{table}' dropped!")
+    except Exception as e:
+        echo_error(f"Error: {e}")
+        sys.exit(1)
+
+
+@data_group.command("vacuum")
+@click.option("--db", default=DEFAULT_DB, help="Database path")
+def data_vacuum(db: str):
+    """Optimize database storage."""
+    try:
+        storage = get_db(db)
+        storage.vacuum()
+        echo_success("Database optimized!")
+    except Exception as e:
+        echo_error(f"Error: {e}")
+        sys.exit(1)
+
+
+@data_group.command("copy-table")
+@click.argument("source")
+@click.argument("target")
+@click.option("--db", default=DEFAULT_DB, help="Database path")
+def data_copy_table(source: str, target: str, db: str):
+    """Copy a table."""
+    try:
+        storage = get_db(db)
+        storage.copy_table(source, target)
+        echo_success(f"Table '{source}' copied to '{target}'!")
+    except Exception as e:
+        echo_error(f"Error: {e}")
         sys.exit(1)
 
 

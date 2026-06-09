@@ -23,9 +23,13 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 import pandas as pd
+import pyarrow as pa
+
+logger = logging.getLogger(__name__)
 
 
 class ETLPipeline:
@@ -114,8 +118,7 @@ class ETLPipeline:
             raise ValueError(f"Unknown table type: {table_type}")
 
     def _transform_calendars(self, source: str) -> int:
-        """转换日历数据"""
-        # 获取ODS数据
+        """转换日历数据 → 按交易所分列"""
         ods_table = f"ods_calendars_{source}"
 
         try:
@@ -128,46 +131,72 @@ class ETLPipeline:
             return 0
 
         # 转换并丰富字段
-        df["year"] = pd.to_datetime(df["date"]).dt.year
-        df["quarter"] = pd.to_datetime(df["date"]).dt.quarter
-        df["month"] = pd.to_datetime(df["date"]).dt.month
-        df["week_of_year"] = pd.to_datetime(df["date"]).dt.isocalendar().week
-        df["day_of_week"] = pd.to_datetime(df["date"]).dt.dayofweek
-        df["is_month_end"] = pd.to_datetime(df["date"]).dt.is_month_end
-        df["is_quarter_end"] = pd.to_datetime(df["date"]).dt.is_quarter_end
-        df["is_year_end"] = pd.to_datetime(df["date"]).dt.is_year_end
-        df["is_week_end"] = pd.to_datetime(df["date"]).dt.dayofweek == 4  # 周五
+        dates = pd.to_datetime(df["date"])
+        df["year"] = dates.dt.year
+        df["quarter"] = dates.dt.quarter
+        df["month"] = dates.dt.month
+        df["week_of_year"] = dates.dt.isocalendar().week.astype(int)
+        df["day_of_week"] = dates.dt.dayofweek
+        df["is_month_end"] = dates.dt.is_month_end
+        df["is_quarter_end"] = dates.dt.is_quarter_end
+        df["is_year_end"] = dates.dt.is_year_end
+        df["is_week_end"] = dates.dt.dayofweek == 4
         df["updated_at"] = datetime.now()
 
-        # 写入DWD
+        # 将 is_trading_day + exchange → 按交易所分列
+        # ODS 一行 = (date, exchange='ALL', is_trading_day=TRUE)
+        # DWD 一行 = (date, sse=TRUE, szse=TRUE, hkse=FALSE, usse=FALSE)
+        exchanges_order = ["sse", "szse", "hkse", "usse"]
+        df["updated_at"] = datetime.now()
+        grouped = df.groupby("date").agg(
+            {**{c: "first" for c in
+                ["year", "quarter", "month", "week_of_year", "day_of_week",
+                 "is_month_end", "is_quarter_end", "is_year_end", "is_week_end", "updated_at"]},
+             "exchange": list, "is_trading_day": list}
+        ).reset_index()
+
+        def _make_row(row):
+            """Spread is_trading_day per exchange. If exchange='ALL', apply to all."""
+            is_day = {}
+            for ex, td in zip(row["exchange"], row["is_trading_day"]):
+                ex_lower = ex.lower() if isinstance(ex, str) else "all"
+                if ex_lower == "all":
+                    # 'ALL' applies to all known exchanges
+                    for e in exchanges_order:
+                        is_day[e] = bool(td)
+                else:
+                    is_day[ex_lower] = bool(td)
+            return is_day
+
         conn = self.db.connect()
-
-        for _, row in df.iterrows():
+        for _, row in grouped.iterrows():
             try:
-                conn.execute(f"""
+                is_day = _make_row(row)
+                conn.execute(
+                    """
                     INSERT INTO dwd_calendars
-                    (date, is_trading_day, year, quarter, month, week_of_year, day_of_week,
-                     is_month_end, is_quarter_end, is_year_end, is_week_end, exchange, updated_at)
-                    VALUES ('{row['date']}', {row['is_trading_day']}, {row['year']}, {row['quarter']},
-                            {row['month']}, {row['week_of_year']}, {row['day_of_week']},
-                            {row['is_month_end']}, {row['is_quarter_end']}, {row['is_year_end']},
-                            {row['is_week_end']}, '{row['exchange']}', '{row['updated_at']}')
+                    (date, sse, szse, hkse, usse,
+                     year, quarter, month, week_of_year, day_of_week,
+                     is_month_end, is_quarter_end, is_year_end, is_week_end, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(date) DO UPDATE SET
-                        is_trading_day = {row['is_trading_day']},
-                        year = {row['year']},
-                        quarter = {row['quarter']},
-                        month = {row['month']},
-                        week_of_year = {row['week_of_year']},
-                        day_of_week = {row['day_of_week']},
-                        is_month_end = {row['is_month_end']},
-                        is_quarter_end = {row['is_quarter_end']},
-                        is_year_end = {row['is_year_end']},
-                        is_week_end = {row['is_week_end']},
-                        updated_at = '{row['updated_at']}'
-                """)
-            except Exception:
-                pass
-
+                        sse=excluded.sse, szse=excluded.szse,
+                        hkse=excluded.hkse, usse=excluded.usse,
+                        updated_at=excluded.updated_at
+                    """,
+                    [
+                        row['date'],
+                        is_day.get('sse', False), is_day.get('szse', False),
+                        is_day.get('hkse', False), is_day.get('usse', False),
+                        row['year'], row['quarter'], row['month'],
+                        row['week_of_year'], row['day_of_week'],
+                        row['is_month_end'], row['is_quarter_end'],
+                        row['is_year_end'], row['is_week_end'],
+                        row['updated_at'],
+                    ],
+                )
+            except Exception as e:
+                logger.warning("日历写入失败 date=%s: %s", row['date'], e)
         conn.commit()
 
         # 记录日志
@@ -197,48 +226,35 @@ class ETLPipeline:
         if df.empty:
             return 0
 
-        # 标准化字段
-        def get_board_type(symbol):
-            if symbol.startswith("688"):
-                return "科创板"
-            elif symbol.startswith(("002", "003")):
-                return "创业板"
-            elif symbol.startswith(("430", "830")):
-                return "北交所"
-            else:
-                return "主板"
-
-        df["board_type"] = df["symbol"].apply(get_board_type)
-        df["status"] = df["delist_date"].apply(lambda x: "DELISTED" if x else "ACTIVE")
         df["updated_at"] = datetime.now()
 
         conn = self.db.connect()
 
         for _, row in df.iterrows():
             try:
-                conn.execute(f"""
-                    INSERT INTO dwd_instruments
-                    (symbol, name, list_date, delist_date, market, board_type, status, updated_at)
-                    VALUES ('{row['symbol']}', '{row['name']}',
-                            {'NULL' if pd.isna(row.get('list_date')) else f"'{row['list_date']}'"},
-                            {'NULL' if pd.isna(row.get('delist_date')) else f"'{row['delist_date']}'"},
-                            '{row['market']}', '{row['board_type']}', '{row['status']}', '{row['updated_at']}')
+                ld = row['list_date'] if not pd.isna(row.get("list_date")) else None
+                dd = row['delist_date'] if not pd.isna(row.get("delist_date")) else None
+                conn.execute(
+                    """
+                    INSERT INTO dwd_instruments_info
+                    (symbol, name, list_date, delist_date, market, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(symbol) DO UPDATE SET
-                        name = '{row['name']}',
-                        delist_date = {'NULL' if pd.isna(row.get('delist_date')) else f"'{row['delist_date']}'"},
-                        status = '{row['status']}',
-                        updated_at = '{row['updated_at']}'
-                """)
-            except Exception:
-                pass
+                        name=excluded.name, delist_date=excluded.delist_date,
+                        updated_at=excluded.updated_at
+                    """,
+                    [row['symbol'], row['name'], ld, dd, row['market'], row['updated_at']],
+                )
+            except Exception as e:
+                logger.warning("证券信息写入失败 symbol=%s: %s", row.get('symbol'), e)
 
         conn.commit()
 
         # 更新参数表
-        self.db.update_table_params("DWD", "dwd_instruments", len(df), source)
+        self.db.update_table_params("DWD", "dwd_instruments_info", len(df), source)
         self.db.log_update(
             layer="ETL",
-            table="dwd_instruments",
+            table="dwd_instruments_info",
             source=source,
             update_type="TRANSFORM",
             records=len(df),
@@ -260,46 +276,39 @@ class ETLPipeline:
         if df.empty:
             return 0
 
-        # 先取消当前标记
-        self.db.execute(
-            "UPDATE dwd_index_components SET is_current = FALSE WHERE is_current = TRUE"
-        )
-
-        df["is_current"] = True
         df["source"] = source
         df["updated_at"] = datetime.now()
 
         conn = self.db.connect()
 
-        # 获取当前最大ID
-        max_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM dwd_index_components").fetchone()[0]
-
         records_processed = 0
         for _, row in df.iterrows():
-            max_id += 1
             try:
-                in_date = f"'{row['in_date']}'" if not pd.isna(row.get("in_date")) else "NULL"
-                out_date = f"'{row['out_date']}'" if not pd.isna(row.get("out_date")) else "NULL"
+                in_date = row['in_date'] if not pd.isna(row.get("in_date")) else None
+                out_date = row['out_date'] if not pd.isna(row.get("out_date")) else None
+                weight = row.get('weight', 0) or 0
 
-                conn.execute(f"""
-                    INSERT INTO dwd_index_components
-                    (id, index_code, index_name, symbol, in_date, out_date, weight, is_current, source, updated_at)
-                    VALUES ({max_id}, '{row['index_code']}', '{row['index_name']}', '{row['symbol']}',
-                            {in_date}, {out_date}, {row.get('weight', 0)}, TRUE, '{source}', '{row['updated_at']}')
-                    ON CONFLICT(index_code, symbol, in_date) DO UPDATE SET
-                        out_date = {out_date},
-                        weight = {row.get('weight', 0)},
-                        is_current = TRUE,
-                        updated_at = '{row['updated_at']}'
-                """)
+                conn.execute(
+                    """
+                    INSERT INTO dwd_instruments_pool_registration
+                    (pool_name, symbol, in_date, out_date, weight, source, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(pool_name, symbol, in_date) DO UPDATE SET
+                        out_date = excluded.out_date,
+                        weight = excluded.weight,
+                        updated_at = excluded.updated_at
+                    """,
+                    [row.get('index_code', source), row['symbol'],
+                     in_date, out_date, weight, source, row['updated_at']],
+                )
                 records_processed += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("成分股写入失败 symbol=%s: %s", row.get('symbol'), e)
 
         conn.commit()
 
         # 更新参数表
-        self.db.update_table_params("DWD", "dwd_index_components", records_processed, source)
+        self.db.update_table_params("DWD", "dwd_instruments_pool_registration", records_processed, source)
 
         return records_processed
 
@@ -337,23 +346,29 @@ class ETLPipeline:
         ]
         df_out = df[[c for c in target_cols if c != "updated_at"]].assign(updated_at=now)
 
-        # DuckDB Arrow native append：比 executemany 快 50 倍
-        # DuckDB.execute() 支持直接接收 pyarrow.Table 作为参数
-        import pyarrow as pa
+        # DuckDB Arrow native：注册 pyarrow Table 后 COPY，比 executemany 快 50 倍
         tbl = pa.Table.from_pandas(df_out, preserve_index=False)
-        conn.execute("DELETE FROM dwd_daily_ohlcv")
-        conn.execute(
-            "INSERT INTO dwd_daily_ohlcv BY NAME SELECT * FROM table_ref",
-            params=[tbl],
-        )
-        total = conn.execute("SELECT COUNT(*) FROM dwd_daily_ohlcv").fetchone()[0]
+
+        # 增量写入：按 (date, symbol) 主键 upsert，不删除已有历史数据
+        conn.register("_tmp_arrow", tbl)
+        conn.execute("""
+            INSERT INTO dwd_daily_basic_factors BY NAME SELECT * FROM _tmp_arrow
+            ON CONFLICT(date, symbol) DO UPDATE SET
+                open = excluded.open, high = excluded.high, low = excluded.low,
+                close = excluded.close, volume = excluded.volume, amount = excluded.amount,
+                turnover_rate = excluded.turnover_rate, pct_change = excluded.pct_change,
+                factor = excluded.factor, raw_close = excluded.raw_close,
+                source = excluded.source, updated_at = excluded.updated_at
+        """)
+
+        total = conn.execute("SELECT COUNT(*) FROM dwd_daily_basic_factors").fetchone()[0]
         conn.commit()
 
         # 更新参数表
-        self.db.update_table_params("DWD", "dwd_daily_ohlcv", total, source)
+        self.db.update_table_params("DWD", "dwd_daily_basic_factors", total, source)
         self.db.log_update(
             layer="ETL",
-            table="dwd_daily_ohlcv",
+            table="dwd_daily_basic_factors",
             source=source,
             update_type="TRANSFORM",
             records=total,

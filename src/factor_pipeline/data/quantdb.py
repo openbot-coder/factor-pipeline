@@ -53,10 +53,13 @@ DATA_DICTIONARY = {
     "dwd_calendars": {
         "name": "交易日历",
         "layer": "DWD",
-        "description": "标准化后的A股交易日历",
+        "description": "标准化后的A股交易日历 (按交易所分列)",
         "fields": {
             "date": {"type": "DATE", "description": "日期"},
-            "is_trading_day": {"type": "BOOLEAN", "description": "是否交易日"},
+            "sse": {"type": "BOOLEAN", "description": "上交所是否交易"},
+            "szse": {"type": "BOOLEAN", "description": "深交所是否交易"},
+            "hkse": {"type": "BOOLEAN", "description": "港交所是否交易"},
+            "usse": {"type": "BOOLEAN", "description": "美股是否交易"},
             "year": {"type": "INTEGER", "description": "年份"},
             "quarter": {"type": "INTEGER", "description": "季度 (1-4)"},
             "month": {"type": "INTEGER", "description": "月份 (1-12)"},
@@ -66,63 +69,56 @@ DATA_DICTIONARY = {
             "is_quarter_end": {"type": "BOOLEAN", "description": "是否季末"},
             "is_year_end": {"type": "BOOLEAN", "description": "是否年末"},
             "is_week_end": {"type": "BOOLEAN", "description": "是否周末"},
-            "exchange": {"type": "VARCHAR", "description": "交易所 (ALL/SSE/SZSE)"},
             "updated_at": {"type": "TIMESTAMP", "description": "更新时间"},
         },
     },
-    "dwd_instruments": {
-        "name": "股票基础信息",
+    "dwd_instruments_info": {
+        "name": "证券上市退市信息",
         "layer": "DWD",
-        "description": "A股股票基本信息",
+        "description": "证券上市/退市时间",
         "fields": {
             "symbol": {"type": "VARCHAR", "description": "股票代码 (如 000001.SZ)"},
             "name": {"type": "VARCHAR", "description": "股票名称"},
             "list_date": {"type": "DATE", "description": "上市日期"},
             "delist_date": {"type": "DATE", "description": "退市日期 (NULL表示仍在交易)"},
             "market": {"type": "VARCHAR", "description": "所属市场 (SSE/SZSE/BSE)"},
-            "board_type": {
-                "type": "VARCHAR",
-                "description": "板块类型 (主板/创业板/科创板/北交所)",
-            },
-            "industry_sw_l1": {"type": "VARCHAR", "description": "申万一级行业"},
-            "status": {"type": "VARCHAR", "description": "状态 (ACTIVE/DELISTED)"},
             "updated_at": {"type": "TIMESTAMP", "description": "更新时间"},
         },
     },
-    "dwd_index_components": {
-        "name": "指数成分股快照",
+    "dwd_instruments_pool_registration": {
+        "name": "股票池进出登记",
         "layer": "DWD",
-        "description": "各指数成分股及其纳入/剔除日期",
+        "description": "股票池进出登记记录",
         "fields": {
-            "id": {"type": "INTEGER", "description": "主键ID"},
-            "index_code": {"type": "VARCHAR", "description": "指数代码 (如 000300.SH)"},
-            "index_name": {"type": "VARCHAR", "description": "指数名称"},
+            "pool_name": {"type": "VARCHAR", "description": "股票池名称 (如 csi300)"},
             "symbol": {"type": "VARCHAR", "description": "股票代码"},
             "in_date": {"type": "DATE", "description": "纳入日期"},
             "out_date": {"type": "DATE", "description": "剔除日期 (NULL表示仍在池中)"},
             "weight": {"type": "DOUBLE", "description": "权重 (%)"},
-            "is_current": {"type": "BOOLEAN", "description": "是否为当前成分股"},
             "source": {"type": "VARCHAR", "description": "数据来源"},
             "updated_at": {"type": "TIMESTAMP", "description": "更新时间"},
         },
     },
-    "dwd_daily_ohlcv": {
-        "name": "日K线数据 (前复权)",
+    "dwd_daily_basic_factors": {
+        "name": "基础日因子 (超宽表)",
         "layer": "DWD",
-        "description": "前复权处理的日线行情数据",
+        "description": "日频基础因子宽表",
         "fields": {
             "date": {"type": "DATE", "description": "交易日期"},
             "symbol": {"type": "VARCHAR", "description": "股票代码"},
-            "open": {"type": "DOUBLE", "description": "开盘价 (前复权)"},
-            "high": {"type": "DOUBLE", "description": "最高价 (前复权)"},
-            "low": {"type": "DOUBLE", "description": "最低价 (前复权)"},
-            "close": {"type": "DOUBLE", "description": "收盘价 (前复权)"},
+            "open": {"type": "DOUBLE", "description": "开盘价"},
+            "high": {"type": "DOUBLE", "description": "最高价"},
+            "low": {"type": "DOUBLE", "description": "最低价"},
+            "close": {"type": "DOUBLE", "description": "收盘价"},
+            "pre_close": {"type": "DOUBLE", "description": "昨收价"},
             "volume": {"type": "DOUBLE", "description": "成交量 (股数)"},
             "amount": {"type": "DOUBLE", "description": "成交额 (元)"},
+            "vwap": {"type": "DOUBLE", "description": "成交均价 (amount/volume)"},
             "turnover_rate": {"type": "DOUBLE", "description": "换手率 (%)"},
             "pct_change": {"type": "DOUBLE", "description": "涨跌幅 (%)"},
-            "factor": {"type": "DOUBLE", "description": "复权因子"},
-            "raw_close": {"type": "DOUBLE", "description": "原始收盘价"},
+            "amplitude": {"type": "DOUBLE", "description": "振幅 (%)"},
+            "price_limit_up": {"type": "DOUBLE", "description": "涨停价"},
+            "price_limit_down": {"type": "DOUBLE", "description": "跌停价"},
             "source": {"type": "VARCHAR", "description": "数据来源"},
             "updated_at": {"type": "TIMESTAMP", "description": "更新时间"},
         },
@@ -286,26 +282,31 @@ CREATE TABLE IF NOT EXISTS ods_daily_ohlcv_{source} (
 
 SCHEMA_DWD = """
 CREATE TABLE IF NOT EXISTS dwd_calendars (
-    date DATE PRIMARY KEY, is_trading_day BOOLEAN DEFAULT TRUE,
+    date DATE PRIMARY KEY,
+    sse BOOLEAN DEFAULT FALSE,
+    szse BOOLEAN DEFAULT FALSE,
+    hkse BOOLEAN DEFAULT FALSE,
+    usse BOOLEAN DEFAULT FALSE,
     year INTEGER, quarter INTEGER, month INTEGER, week_of_year INTEGER, day_of_week INTEGER,
     is_month_end BOOLEAN, is_quarter_end BOOLEAN, is_year_end BOOLEAN, is_week_end BOOLEAN,
-    exchange VARCHAR DEFAULT 'ALL', updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-CREATE TABLE IF NOT EXISTS dwd_instruments (
-    symbol VARCHAR PRIMARY KEY, name VARCHAR, list_date DATE, delist_date DATE, market VARCHAR,
-    board_type VARCHAR, industry_sw_l1 VARCHAR, industry_sw_l2 VARCHAR, industry_sw_l3 VARCHAR,
-    industry_csrc VARCHAR, status VARCHAR DEFAULT 'ACTIVE', updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS dwd_instruments_info (
+    symbol VARCHAR PRIMARY KEY, name VARCHAR, list_date DATE, delist_date DATE,
+    market VARCHAR, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-CREATE TABLE IF NOT EXISTS dwd_index_components (
-    id INTEGER PRIMARY KEY, index_code VARCHAR, index_name VARCHAR, symbol VARCHAR,
-    in_date DATE, out_date DATE, weight DOUBLE, is_current BOOLEAN DEFAULT FALSE,
+CREATE TABLE IF NOT EXISTS dwd_instruments_pool_registration (
+    pool_name VARCHAR, symbol VARCHAR, in_date DATE, out_date DATE,
+    weight DOUBLE, source VARCHAR, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (pool_name, symbol, in_date)
+);
+CREATE TABLE IF NOT EXISTS dwd_daily_basic_factors (
+    date DATE, symbol VARCHAR,
+    open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE, pre_close DOUBLE,
+    volume DOUBLE, amount DOUBLE, vwap DOUBLE,
+    turnover_rate DOUBLE, pct_change DOUBLE, amplitude DOUBLE,
+    price_limit_up DOUBLE, price_limit_down DOUBLE,
     source VARCHAR, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(index_code, symbol, in_date)
-);
-CREATE TABLE IF NOT EXISTS dwd_daily_ohlcv (
-    date DATE, symbol VARCHAR, open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE,
-    volume DOUBLE, amount DOUBLE, turnover_rate DOUBLE, pct_change DOUBLE,
-    factor DOUBLE DEFAULT 1.0, raw_close DOUBLE, source VARCHAR, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (date, symbol)
 );
 """
@@ -422,37 +423,37 @@ VALIDATION_RULES = [
     ValidationRule(
         "dwd_instruments_list_date",
         "DWD",
-        "dwd_instruments",
+        "dwd_instruments_info",
         "list_date",
         "accuracy",
-        "SELECT COUNT(*) FROM dwd_instruments WHERE list_date > CURRENT_DATE OR list_date < '1990-01-01'",
+        "SELECT COUNT(*) FROM dwd_instruments_info WHERE list_date > CURRENT_DATE OR list_date < '1990-01-01'",
         "count = 0",
     ),
     ValidationRule(
-        "dwd_ohlcv_price_consistency",
+        "dwd_basic_factors_price_consistency",
         "DWD",
-        "dwd_daily_ohlcv",
+        "dwd_daily_basic_factors",
         "high/low/close",
         "consistency",
-        "SELECT COUNT(*) FROM dwd_daily_ohlcv WHERE high < low OR high < close OR low > open",
+        "SELECT COUNT(*) FROM dwd_daily_basic_factors WHERE high < low OR high < close OR low > open",
         "count = 0",
     ),
     ValidationRule(
-        "dwd_ohlcv_volume_positive",
+        "dwd_basic_factors_volume_positive",
         "DWD",
-        "dwd_daily_ohlcv",
+        "dwd_daily_basic_factors",
         "volume",
         "accuracy",
-        "SELECT COUNT(*) FROM dwd_daily_ohlcv WHERE volume < 0 OR amount < 0",
+        "SELECT COUNT(*) FROM dwd_daily_basic_factors WHERE volume < 0 OR amount < 0",
         "count = 0",
     ),
     ValidationRule(
-        "dwd_ohlcv_timeliness",
+        "dwd_basic_factors_timeliness",
         "DWD",
-        "dwd_daily_ohlcv",
+        "dwd_daily_basic_factors",
         "date",
         "timeliness",
-        "SELECT MAX(date) FROM dwd_daily_ohlcv",
+        "SELECT MAX(date) FROM dwd_daily_basic_factors",
         "max_date >= TODAY - 1",
         "WARNING",
     ),
@@ -536,7 +537,7 @@ class QuantDB:
         conn.execute(SCHEMA_APP)
         conn.execute(SCHEMA_META)
         conn.commit()
-        print(f"✅ 数据库Schema初始化完成: {self.db_path}")
+        print(f"[OK] 数据库Schema初始化完成: {self.db_path}")
 
     def execute(self, sql: str, params: dict | None = None) -> duckdb.DuckDBPyConnection:
         conn = self.connect()
@@ -688,12 +689,19 @@ class QuantDB:
                     [row["date"], row["exchange"], row["is_trading_day"], source, row["fetched_at"]]
                 )
             elif table_type == "instruments":
+                ld = row.get("list_date")
+                dd = row.get("delist_date")
+                # 处理 NaN/NaT → None (DuckDB 不接受 float 作为 DATE)
+                if ld is not None and pd.isna(ld):
+                    ld = None
+                if dd is not None and pd.isna(dd):
+                    dd = None
                 records.append(
                     [
                         row["symbol"],
                         row["name"],
-                        row.get("list_date"),
-                        row.get("delist_date"),
+                        ld,
+                        dd,
                         row["market"],
                         source,
                         row["fetched_at"],
@@ -785,7 +793,7 @@ class QuantDB:
         if end:
             conditions.append(f"date <= '{end}'")
         where = " AND ".join(conditions) if conditions else "1=1"
-        df = self.query(f"SELECT * FROM dwd_daily_ohlcv WHERE {where} ORDER BY date, symbol")
+        df = self.query(f"SELECT * FROM dwd_daily_basic_factors WHERE {where} ORDER BY date, symbol")
         df["date"] = pd.to_datetime(df["date"])
         return df
 
@@ -794,16 +802,18 @@ class QuantDB:
         if market:
             conditions.append(f"market = '{market}'")
         if active_only:
-            conditions.append("status = 'ACTIVE'")
+            conditions.append(
+                "delist_date IS NULL OR delist_date >= CURRENT_DATE"
+            )
         where = " AND ".join(conditions) if conditions else "1=1"
-        return self.query(f"SELECT * FROM dwd_instruments WHERE {where} ORDER BY symbol")
+        return self.query(f"SELECT * FROM dwd_instruments_info WHERE {where} ORDER BY symbol")
 
     def get_current_index_members(self, index_code: str) -> pd.DataFrame:
         return self.query(f"""
-            SELECT ic.index_code, ic.index_name, ic.symbol, i.name, ic.in_date, ic.weight
-            FROM dwd_index_components ic
-            LEFT JOIN dwd_instruments i ON ic.symbol = i.symbol
-            WHERE ic.index_code = '{index_code}' AND ic.is_current = TRUE
+            SELECT ic.pool_name AS index_code, ic.symbol, i.name, ic.in_date, ic.weight, ic.source
+            FROM dwd_instruments_pool_registration ic
+            LEFT JOIN dwd_instruments_info i ON ic.symbol = i.symbol
+            WHERE ic.pool_name = '{index_code}' AND ic.out_date IS NULL
             ORDER BY ic.weight DESC
         """)
 
@@ -826,7 +836,7 @@ class QuantDB:
                    MIN(date), MAX(date), FIRST(open), LAST(close), MAX(high), MIN(low),
                    SUM(volume), SUM(amount), AVG(turnover_rate),
                    (LAST(close) - FIRST(open)) / FIRST(open) * 100
-            FROM dwd_daily_ohlcv
+            FROM dwd_daily_basic_factors
             {where}
             GROUP BY symbol, EXTRACT(YEAR FROM date), EXTRACT(MONTH FROM date)
             ON CONFLICT(symbol, year, month) DO UPDATE SET
@@ -959,7 +969,7 @@ class QuantDB:
         for layer, tables in [
             (
                 "DWD",
-                ["dwd_calendars", "dwd_instruments", "dwd_index_components", "dwd_daily_ohlcv"],
+                ["dwd_calendars", "dwd_instruments_info", "dwd_instruments_pool_registration", "dwd_daily_basic_factors"],
             ),
             (
                 "APP",

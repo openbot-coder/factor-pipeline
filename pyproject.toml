@@ -51,6 +51,10 @@ test = [
     "duckdb>=1.0",
     "pytest>=7.4",
 ]
+data = [
+    "baostock>=0.9",
+    "akshare>=1.10",
+]
 
 [project.scripts]
 fp = "factor_pipeline.cli:main"

@@ -26,14 +26,14 @@ pip install -e ".[dev]"
 ## Running Tests
 
 ```bash
-# Run all tests
-pytest tests/ -v
+# Run all tests (testpaths configured in pyproject.toml: src/tests/)
+pytest src/tests/ -v
 
 # Run with coverage
-pytest tests/ -v --cov=. --cov-report=html
+pytest src/tests/ -v --cov=. --cov-report=html
 
 # Run specific test file
-pytest tests/test_ic.py -v
+pytest src/tests/test_storage.py -v
 ```
 
 ## Code Style
