@@ -99,8 +99,8 @@ class UnaryOp(Operator):
 
     n_args: int = 1
 
-    def evaluate(self, x: np.ndarray) -> np.ndarray:
-        return self._compute(x)
+    def evaluate(self, x: np.ndarray, **kwargs: Any) -> np.ndarray:
+        return self._compute(x, **kwargs)
 
     @abstractmethod
     def _compute(self, x: np.ndarray) -> np.ndarray:
@@ -113,8 +113,8 @@ class BinaryOp(Operator):
 
     n_args: int = 2
 
-    def evaluate(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-        return self._compute(x, y)
+    def evaluate(self, x: np.ndarray, y: np.ndarray, **kwargs: Any) -> np.ndarray:
+        return self._compute(x, y, **kwargs)
 
     @abstractmethod
     def _compute(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -128,8 +128,8 @@ class WindowOp(Operator):
     n_args: int = 2
     window_required: int = 1
 
-    def evaluate(self, x: np.ndarray, window: int) -> np.ndarray:
-        return self._compute(x, window)
+    def evaluate(self, x: np.ndarray, window: int, **kwargs: Any) -> np.ndarray:
+        return self._compute(x, window, **kwargs)
 
     @abstractmethod
     def _compute(self, x: np.ndarray, window: int) -> np.ndarray:
@@ -142,8 +142,8 @@ class TripleOp(Operator):
 
     n_args: int = 3
 
-    def evaluate(self, x: np.ndarray, y: np.ndarray, z: Any) -> np.ndarray:
-        return self._compute(x, y, z)
+    def evaluate(self, x: np.ndarray, y: np.ndarray, z: Any, **kwargs: Any) -> np.ndarray:
+        return self._compute(x, y, z, **kwargs)
 
     @abstractmethod
     def _compute(self, x: np.ndarray, y: np.ndarray, z: Any) -> np.ndarray:
@@ -473,7 +473,9 @@ class Prod(WindowOp):
     window_required = 1
 
     def _compute(self, x: np.ndarray, window: int) -> np.ndarray:
-        return pd.Series(x).rolling(window, min_periods=1).prod().values
+        return pd.Series(x).rolling(window, min_periods=1).apply(
+            lambda y: np.prod(y), raw=True
+        ).values
 
 
 class Count(WindowOp):
@@ -504,7 +506,7 @@ class First(WindowOp):
 
     def _compute(self, x: np.ndarray, window: int) -> np.ndarray:
         return (
-            pd.Series(x).rolling(window, min_periods=1).apply(lambda y: y.iloc[0], raw=True).values
+            pd.Series(x).rolling(window, min_periods=1).apply(lambda y: y.iloc[0]).values
         )
 
 
@@ -516,7 +518,7 @@ class Last(WindowOp):
 
     def _compute(self, x: np.ndarray, window: int) -> np.ndarray:
         return (
-            pd.Series(x).rolling(window, min_periods=1).apply(lambda y: y.iloc[-1], raw=True).values
+            pd.Series(x).rolling(window, min_periods=1).apply(lambda y: y.iloc[-1]).values
         )
 
 
@@ -601,7 +603,7 @@ class Quantile(UnaryOp):
 
     def _compute(self, x: np.ndarray, q: float = 0.5) -> np.ndarray:
         df = pd.DataFrame({"x": x})
-        return df["x"].rank(method="normal", na_option="keep").values / (len(x) + 1)
+        return df["x"].rank(method="average", na_option="keep").values / (len(x) + 1)
 
 
 class Decile(UnaryOp):
@@ -1024,7 +1026,8 @@ class OperatorRegistry:
 
     def register(self, op: Operator) -> None:
         """Register an operator instance."""
-        self._operators[op.name] = type(op)
+        name = getattr(type(op), "name", None) or type(op).__name__
+        self._operators[name] = type(op)
 
     def get(self, name: str) -> type[Operator] | None:
         """Get operator class by name."""

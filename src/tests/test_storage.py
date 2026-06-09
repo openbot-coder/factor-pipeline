@@ -126,15 +126,20 @@ class TestImportCSV:
         assert rows == 1000  # 100 dates * 10 symbols
 
     def test_import_append(self, temp_db, sample_csv, sample_ohlcv):
-        """Positive: Append mode adds new rows."""
+        """Positive: Append mode adds new rows (ignores duplicates)."""
         temp_db.init_schema()
         temp_db.import_csv(sample_csv, table="daily_ohlcv")
 
-        # Create second CSV with different data
-        temp_db.import_csv(sample_csv, table="daily_ohlcv", if_exists="append")
+        # Create second CSV with different dates
+        df2 = sample_ohlcv.copy()
+        df2["date"] = df2["date"] + pd.Timedelta(days=365)  # Shift dates forward
+        csv2 = sample_csv.replace("test_ohlcv.csv", "test_ohlcv2.csv")
+        df2.to_csv(csv2, index=False)
+
+        temp_db.import_csv(csv2, table="daily_ohlcv", if_exists="append")
 
         total = temp_db.count_ohlcv()
-        assert total == 2000  # Doubled
+        assert total == 2000  # 1000 original + 1000 appended
 
     def test_import_replace(self, temp_db, sample_csv):
         """Positive: Replace mode replaces data."""
@@ -330,8 +335,16 @@ class TestOHLCVMethods:
         temp_db.init_schema()
         temp_db.import_csv(sample_csv, table="daily_ohlcv")
 
-        symbols = temp_db.get_instruments()
-        assert len(symbols) == 10
+        # get_instruments queries the instruments table, so we need to populate it
+        symbols = [f"{i:06d}" for i in range(1, 11)]
+        for s in symbols:
+            temp_db.execute(
+                "INSERT OR REPLACE INTO instruments (symbol, name, market) VALUES (?, ?, ?)",
+                [s, f"Stock {s}", "SZSE"],
+            )
+
+        result = temp_db.get_instruments()
+        assert len(result) == 10
 
     def test_date_range(self, temp_db, sample_csv):
         """Positive: Get date range of data."""

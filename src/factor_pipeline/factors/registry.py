@@ -13,7 +13,7 @@ from typing import Callable
 _REGISTRY: dict[str, Callable] = OrderedDict()
 
 
-def register_factor(*, name: str = None):
+def register_factor(arg=None, *, name: str = None):
     """Decorator to register a factor function/class.
 
     Usage:
@@ -23,10 +23,23 @@ def register_factor(*, name: str = None):
         @register_factor(name="my_custom_vwap")
         def some_factor(data): ...
 
-    Note:
-        The first argument must NOT be a positional argument.
-        ``@register_factor("name")`` is invalid — use ``@register_factor(name="name")`` instead.
+        @register_factor("custom_name")
+        def some_factor(data): ...
+
+    Supports both bare ``@register_factor`` and parameterised forms.
     """
+    # Bare decorator: @register_factor (no parens) — arg is the function itself
+    if callable(arg):
+        fn = arg
+        fn_name = name or fn.__name__
+        if fn_name in _REGISTRY:
+            raise ValueError(f"Duplicate factor name: {fn_name}")
+        _REGISTRY[fn_name] = fn
+        return fn
+
+    # Parameterised: @register_factor(name=...) or @register_factor("name") or @register_factor()
+    if isinstance(arg, str):
+        name = arg
 
     def _decorator(fn: Callable):
         fn_name = name or fn.__name__
@@ -65,7 +78,12 @@ class FactorRegistry:
 
     @staticmethod
     def register(fn: Callable, name: str = None):
-        register_factor(fn, name=name)
+        if name:
+            register_factor(fn, name=name)
+        else:
+            # Check if the callable has a 'name' attribute (e.g. classes)
+            cls_name = getattr(fn, 'name', None) or fn.__name__
+            register_factor(fn, name=cls_name)
 
     @staticmethod
     def count() -> int:

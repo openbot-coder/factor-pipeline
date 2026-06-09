@@ -36,6 +36,8 @@ dependencies = [
     "duckdb>=1.0",
     "click>=8.0",
     "pyarrow>=14.0",
+    "pytest>=8.4.2",
+    "pytest-cov>=7.1.0",
 ]
 
 [project.optional-dependencies]

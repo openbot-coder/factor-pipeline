@@ -249,7 +249,7 @@ class DuckDBStorage:
         """Show all tables and their schemas."""
         conn = self.connect()
         result = conn.execute("""
-            SELECT table_name, column_name, column_type, is_nullable
+            SELECT table_name, column_name, data_type AS column_type, is_nullable
             FROM information_schema.columns
             WHERE table_schema = 'main'
             ORDER BY table_name, ordinal_position
@@ -304,16 +304,62 @@ class DuckDBStorage:
         """
         conn = self.connect()
 
-        # Read CSV
+        # Read CSV — handle empty file
+        import io
+        import os
+
+        if os.path.getsize(csv_path) == 0:
+            return 0
+
         parse_dates = parse_dates or []
-        if date_col not in parse_dates:
-            parse_dates.append(date_col)
+        # Only add date_col to parse_dates if it exists in the CSV header
+        try:
+            with open(csv_path, "r") as f:
+                header = f.readline().strip()
+            header_cols = [c.strip() for c in header.split(",")]
+            if date_col in header_cols and date_col not in parse_dates:
+                parse_dates.append(date_col)
+        except Exception:
+            if date_col not in parse_dates:
+                parse_dates.append(date_col)
 
-        df = pd.read_csv(csv_path, parse_dates=parse_dates, **kwargs)
+        # Force symbol_col to string to preserve leading zeros (e.g. "000001")
+        dtype_spec = {}
+        if symbol_col:
+            dtype_spec[symbol_col] = str
 
-        # Rename columns if needed
-        if columns_map:
-            df = df.rename(columns=columns_map)
+        df = pd.read_csv(csv_path, parse_dates=parse_dates or None,
+                         dtype=dtype_spec if dtype_spec else None, **kwargs)
+
+        if df.empty:
+            return 0
+
+        # Coerce NaT dates to None to avoid DuckDB conversion errors
+        # Force datetime conversion with errors='coerce', then format to string
+        for dt_col in ["date", "list_date", "delist_date"]:
+            if dt_col in df.columns:
+                if not pd.api.types.is_datetime64_any_dtype(df[dt_col]):
+                    df[dt_col] = pd.to_datetime(df[dt_col], errors="coerce")
+                if pd.api.types.is_datetime64_any_dtype(df[dt_col]):
+                    df[dt_col] = df[dt_col].apply(
+                        lambda x: x.strftime("%Y-%m-%d") if pd.notna(x) else None
+                    )
+
+        # Drop rows where PRIMARY KEY columns (date) are None
+        if "date" in df.columns:
+            before = len(df)
+            df = df.dropna(subset=["date"])
+            if len(df) < before:
+                pass  # Rows with invalid dates dropped
+
+        # Rename columns if needed — also handle date_col/symbol_col mapping
+        rename_map = dict(columns_map) if columns_map else {}
+        if date_col and date_col != "date" and date_col in df.columns and "date" not in rename_map.values():
+            rename_map[date_col] = "date"
+        if symbol_col and symbol_col != "symbol" and symbol_col in df.columns and "symbol" not in rename_map.values():
+            rename_map[symbol_col] = "symbol"
+        if rename_map:
+            df = df.rename(columns=rename_map)
 
         # Handle if_exists
         if if_exists == "replace":
@@ -323,7 +369,13 @@ class DuckDBStorage:
 
         # Import
         if if_exists == "append":
-            conn.execute(f"INSERT INTO {table} BY NAME SELECT * FROM df")
+            try:
+                conn.execute(
+                    f"INSERT OR IGNORE INTO {table} BY NAME SELECT * FROM df"
+                )
+            except Exception:
+                # Fallback: plain insert (for tables without PK or freshly created)
+                conn.execute(f"INSERT INTO {table} BY NAME SELECT * FROM df")
         elif if_exists == "fail":
             count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             if count > 0:
@@ -549,10 +601,12 @@ class DuckDBStorage:
         """Get total number of OHLCV records."""
         return self.fetchone("SELECT COUNT(*) FROM daily_ohlcv")[0]
 
-    def date_range(self) -> tuple[str, str]:
+    def date_range(self) -> tuple[str | None, str | None]:
         """Get min and max dates in OHLCV data."""
         row = self.fetchone("SELECT MIN(date), MAX(date) FROM daily_ohlcv")
-        return (str(row[0]), str(row[1])) if row else (None, None)
+        if not row or row[0] is None:
+            return (None, None)
+        return (str(row[0]), str(row[1]))
 
     # -------------------------------------------------------------------------
     # Data Loading (merged from data/loader.py)
