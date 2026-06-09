@@ -8,15 +8,19 @@ from io import BytesIO
 from pathlib import Path
 
 import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 from jinja2 import Environment, FileSystemLoader
 
 from factor_pipeline.analysis.ic import ICAnalysis
 from factor_pipeline.analysis.layered import LayeredBacktest
+
+# Lazily set Agg backend only if no backend has been configured yet;
+# this avoids clobbering backends chosen by callers.
+if matplotlib.get_backend().lower() in ("agg", "default"):
+    matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt  # noqa: E402 (must follow use())
 
 sns.set_theme(style="whitegrid", font_scale=0.8)
 

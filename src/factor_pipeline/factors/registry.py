@@ -69,6 +69,11 @@ class FactorRegistry:
     def count() -> int:
         return len(_REGISTRY)
 
+    @staticmethod
+    def clear():
+        """Remove all registered factors."""
+        _REGISTRY.clear()
+
     def __len__(self):
         return len(_REGISTRY)
 

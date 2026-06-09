@@ -40,7 +40,15 @@ class ICAnalysis:
 
         Args:
             method: "spearman" (Rank IC, default) or "pearson"
+
+        Raises:
+            ValueError: If method is not "spearman" or "pearson".
         """
+        if method not in ("spearman", "pearson"):
+            raise ValueError(
+                f"Unknown IC method: {method!r}. Expected 'spearman' or 'pearson'."
+            )
+
         dates = self._factor.index.get_level_values(0).unique()
         ic_values = {}
 

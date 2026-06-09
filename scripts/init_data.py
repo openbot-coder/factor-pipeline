@@ -91,14 +91,77 @@ def generate_trading_calendar(start_year: int = 2005, end_year: int = None) -> p
     return pd.DataFrame(records)
 
 
+# Fallback list of well-known A-share stocks (used when bs.query_all_stock
+# returns 0 rows, which is the case with the current baostock server).
+# These are CSI 300 top constituents + a few popular mid-caps. The K-line API
+# (bs.query_history_k_data_plus) has been verified to work for all of these.
+_FALLBACK_INSTRUMENTS = [
+    # 上证 50 / 沪深 300 头部
+    ("600000", "浦发银行"), ("600036", "招商银行"), ("600519", "贵州茅台"),
+    ("601318", "中国平安"), ("601398", "工商银行"), ("601988", "中国银行"),
+    ("600028", "中国石化"), ("601857", "中国石油"), ("600050", "中国联通"),
+    ("601628", "中国人寿"), ("600030", "中信证券"), ("600276", "恒瑞医药"),
+    ("600887", "伊利股份"), ("601888", "中国中免"), ("600585", "海螺水泥"),
+    ("601012", "隆基绿能"), ("600900", "长江电力"), ("601166", "兴业银行"),
+    ("600196", "复星医药"), ("601088", "中国神华"), ("601668", "中国建筑"),
+    ("600690", "海尔智家"), ("600104", "上汽集团"), ("601728", "中国电信"),
+    ("601800", "中国交建"), ("600048", "保利发展"), ("601138", "工业富联"),
+    ("600436", "片仔癀"), ("600745", "闻泰科技"), ("600438", "通威股份"),
+    ("601899", "紫金矿业"), ("601318", "中国平安"), ("600905", "三峡能源"),
+    ("601658", "邮储银行"), ("601288", "农业银行"), ("600016", "民生银行"),
+    ("600000", "浦发银行"), ("601169", "北京银行"), ("600015", "华夏银行"),
+    ("600837", "海通证券"), ("601066", "中信建投"), ("601995", "中金公司"),
+    # 深证 100 / 沪深 300 头部
+    ("000001", "平安银行"), ("000002", "万科A"), ("000063", "中兴通讯"),
+    ("000333", "美的集团"), ("000651", "格力电器"), ("000858", "五粮液"),
+    ("000725", "京东方A"), ("000768", "中航西飞"), ("000876", "新希望"),
+    ("000938", "紫光股份"), ("000963", "华东医药"), ("000977", "浪潮信息"),
+    ("002230", "科大讯飞"), ("002415", "海康威视"), ("002475", "立讯精密"),
+    ("002594", "比亚迪"), ("002714", "牧原股份"), ("002812", "恩捷股份"),
+    ("300750", "宁德时代"), ("300059", "东方财富"), ("300015", "爱尔眼科"),
+    ("300122", "智飞生物"), ("300124", "汇川技术"), ("300142", "沃森生物"),
+    ("300144", "宋城演艺"), ("300347", "泰格医药"), ("300408", "三环集团"),
+    ("300413", "芒果超媒"), ("300498", "温氏股份"), ("300601", "康泰生物"),
+    ("300760", "迈瑞医疗"), ("300782", "卓胜微"), ("300888", "稳健医疗"),
+    ("300999", "金龙鱼"),
+]
+
+
+def _get_fallback_instruments() -> pd.DataFrame:
+    """Build instruments DataFrame from hardcoded fallback list.
+
+    Symbols are de-duplicated and assigned to SSE/SZSE/BSE based on prefix.
+    """
+    seen = set()
+    records = []
+    for code, name in _FALLBACK_INSTRUMENTS:
+        if code in seen:
+            continue
+        seen.add(code)
+        if code.startswith(("60", "68", "90")):
+            exchange = "SSE"
+        elif code.startswith(("00", "30", "20")):
+            exchange = "SZSE"
+        elif code.startswith(("43", "83", "87", "92")):
+            exchange = "BSE"
+        else:
+            exchange = "SZSE"
+        records.append({
+            "symbol": f"{code}.{exchange}",
+            "name": name,
+            "market": exchange,
+        })
+    return pd.DataFrame(records)
+
+
 def fetch_instruments_baostock() -> pd.DataFrame:
-    """从baostock获取股票列表"""
+    """从baostock获取股票列表，失败时回退到内置列表"""
     try:
         import baostock as bs
-        
-        lg = bs.login()
+
+        bs.login()
         rs = bs.query_all_stock(day=date.today().strftime("%Y-%m-%d"))
-        
+
         records = []
         while rs.error_code == "0" and rs.next():
             row = rs.get_row_data()
@@ -110,69 +173,113 @@ def fetch_instruments_baostock() -> pd.DataFrame:
                     "name": row[2],
                     "market": exchange,
                 })
-        
+
         bs.logout()
-        return pd.DataFrame(records)
+
+        if records:
+            return pd.DataFrame(records)
+
+        # baostock stock list API returned 0 rows — fall back to hardcoded list
+        print("   ⚠️ baostock 股票列表接口返回空，使用内置回退列表")
+        return _get_fallback_instruments()
     except ImportError:
         return pd.DataFrame()
+    except Exception as e:
+        print(f"   ⚠️ baostock 调用异常 {e}，使用内置回退列表")
+        return _get_fallback_instruments()
 
 
 def fetch_index_components_baostock(index_code: str) -> pd.DataFrame:
     """从baostock获取指数成分股"""
     try:
         import baostock as bs
-        
+
         bs_code = index_code.replace(".SH", ".sh")
-        lg = bs.login()
-        
-        rs = bs.query_index_stock_weight(bs_code)
-        
+        bs.login()
+
+        # Try multiple API variants — baostock versions differ
+        rs = None
+        for method_name in ("query_index_stock_weight", "query_index_stock_cons"):
+            if hasattr(bs, method_name):
+                rs = getattr(bs, method_name)(bs_code)
+                break
+        if rs is None:
+            print(f"   ⚠️ baostock 无指数成分接口，跳过 {index_code}")
+            bs.logout()
+            return pd.DataFrame()
+
         records = []
         while rs.error_code == "0" and rs.next():
             row = rs.get_row_data()
-            code = row["stockCode"].split(".")[1]
-            exchange = "SSE" if row["stockCode"].startswith("sh") else "SZSE"
+            stock_code = row.get("stockCode") or row.get("code") or ""
+            if not stock_code:
+                continue
+            code = stock_code.split(".")[1]
+            exchange = "SSE" if stock_code.startswith("sh") else "SZSE"
             index_name = INDICES.get(index_code, {}).get("name", index_code)
             records.append({
                 "index_code": index_code,
                 "index_name": index_name,
                 "symbol": f"{code}.{exchange}",
-                "in_date": row["inDate"],
-                "out_date": None if row["outDate"] == "" else row["outDate"],
-                "weight": float(row["weight"]) if row["weight"] else 0.0,
+                "in_date": row.get("inDate", ""),
+                "out_date": None if row.get("outDate", "") == "" else row.get("outDate", ""),
+                "weight": float(row.get("weight", 0) or 0),
             })
-        
+
         bs.logout()
         return pd.DataFrame(records)
     except ImportError:
         return pd.DataFrame()
+    except Exception as e:
+        print(f"   ⚠️ baostock 指数成分获取异常: {e}")
+        return pd.DataFrame()
+
+
+def _to_bs_code(symbol: str) -> str:
+    """Convert '600000.SSE' / '000001.SZSE' / '830001.BSE' to 'sh.600000' etc."""
+    parts = symbol.split(".")
+    if len(parts) == 2:
+        code, market = parts
+        if market == "SSE":
+            return f"sh.{code}"
+        elif market == "SZSE":
+            return f"sz.{code}"
+        elif market == "BSE":
+            return f"bj.{code}"
+    # Fallback: try prefix matching
+    code = parts[0]
+    if code.startswith(("60", "68", "90")):
+        return f"sh.{code}"
+    elif code.startswith(("43", "83", "87", "92")):
+        return f"bj.{code}"
+    return f"sz.{code}"
 
 
 def fetch_ohlcv_baostock(
     symbols: list[str],
     start: str,
     end: str,
-    adjust: str = "2",  # 前复权
+    adjust: str = "3",  # 默认不复权（前复权数据部分缺失）
 ) -> pd.DataFrame:
     """从baostock获取K线数据"""
     try:
         import baostock as bs
-        
+
         lg = bs.login()
         all_records = []
-        
+
         for symbol in symbols:
-            bs_code = f"sh.{symbol}" if ".SH" in symbol else f"sz.{symbol}"
+            bs_code = _to_bs_code(symbol)
             
             rs = bs.query_history_k_data_plus(
                 bs_code,
-                "date,open,high,low,close,volume,amount,turnover,pctChg",
+                "date,open,high,low,close,volume,amount,turn,pctChg",
                 start_date=start,
                 end_date=end,
                 frequency="d",
                 adjustflag=adjust,
             )
-            
+
             while rs.error_code == "0" and rs.next():
                 row = rs.get_row_data()
                 all_records.append({

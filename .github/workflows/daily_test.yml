@@ -32,8 +32,18 @@ jobs:
       - name: Run full batch analysis
         run: |
           mkdir -p reports/daily
-          fp factor batch --factors alpha001 alpha002 alpha003 alpha004 alpha005 \
-            alpha006 alpha007 alpha008 alpha009 alpha010 --out reports/daily || true
+          # factor batch requires a file path containing one expression per line
+          cat > /tmp/factors.txt <<'EOF'
+          $close
+          Mean($close, 5)
+          Mean($close, 20)
+          Std($close, 20)
+          Delta($close, 1)
+          Rank($close)
+          Log($volume)
+          Corr($close, $volume, 20)
+          EOF
+          fp factor batch /tmp/factors.txt --output reports/daily || true
         continue-on-error: true
 
       - name: Generate summary report

@@ -871,10 +871,13 @@ class QuantDB:
 
             self.execute(f"""
                 INSERT INTO meta_validation_log
-                (layer, table_name, check_type, check_column, expected_value, actual_value, passed, details)
-                VALUES ('{result.rule.layer}', '{result.rule.table}', '{result.rule.check_type}',
-                        '{result.rule.column}', '{result.expected}', '{result.actual}',
-                        {result.passed}, '{details_json}')
+                (id, layer, table_name, check_type, check_column, expected_value, actual_value, passed, details)
+                VALUES (
+                    (SELECT COALESCE(MAX(id), 0) + 1 FROM meta_validation_log),
+                    '{result.rule.layer}', '{result.rule.table}', '{result.rule.check_type}',
+                    '{result.rule.column}', '{result.expected}', '{result.actual}',
+                    {result.passed}, '{details_json}'
+                )
             """)
         return results
 

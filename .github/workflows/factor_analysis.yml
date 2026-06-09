@@ -61,7 +61,9 @@ jobs:
           END: ${{ steps.params.outputs.end }}
         run: |
           mkdir -p reports/scheduled
-          fp factor batch --factors $FACTORS --start $START --end $END --out reports/scheduled || echo "Analysis skipped"
+          # factor batch takes a file of expressions (one per line), not --factors
+          echo "$FACTORS" | tr ' ' '\n' > /tmp/factors.txt
+          fp factor batch /tmp/factors.txt --start $START --end $END --output reports/scheduled || echo "Analysis skipped"
 
       - name: Upload reports
         if: always()

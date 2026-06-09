@@ -1,10 +1,10 @@
 """Command-line interface for data management.
 
 Usage:
-    python -m data.cli --help
-    python -m data.cli info --db data/ohlcv.duckdb
-    python -m data.cli import-csv data.csv --db data/ohlcv.duckdb
-    python -m data.cli run "Mean($close, 20)" --db data/ohlcv.duckdb
+    python -m factor_pipeline.data.cli --help
+    python -m factor_pipeline.data.cli info --db data/ohlcv.duckdb
+    python -m factor_pipeline.data.cli import-csv data.csv --db data/ohlcv.duckdb
+    python -m factor_pipeline.data.cli run "Mean($close, 20)" --db data/ohlcv.duckdb
 """
 
 from __future__ import annotations
@@ -81,9 +81,9 @@ def cli():
         FACTOR_PIPELINE_DB: Default database path
 
     Examples:
-        python -m data.cli info
-        python -m data.cli import-csv data.csv --table daily_ohlcv
-        python -m data.cli query "SELECT * FROM daily_ohlcv LIMIT 10"
+        python -m factor_pipeline.data.cli info
+        python -m factor_pipeline.data.cli import-csv data.csv --table daily_ohlcv
+        python -m factor_pipeline.data.cli query "SELECT * FROM daily_ohlcv LIMIT 10"
     """
     pass
 
@@ -180,9 +180,9 @@ def import_csv_cmd(
     """Import CSV file into database.
 
     Examples:
-        python -m data.cli import-csv data.csv --table daily_ohlcv
-        python -m data.cli import-csv data.csv --table daily_ohlcv --date-col trade_date
-        python -m data.cli import-csv data.csv --table daily_ohlcv --if-exists replace
+        python -m factor_pipeline.data.cli import-csv data.csv --table daily_ohlcv
+        python -m factor_pipeline.data.cli import-csv data.csv --table daily_ohlcv --date-col trade_date
+        python -m factor_pipeline.data.cli import-csv data.csv --table daily_ohlcv --if-exists replace
     """
     try:
         click.echo(f"📥 Importing {csv_path} into '{table}'...")
@@ -227,8 +227,8 @@ def import_dir_cmd(
     """Import all CSV files from directory.
 
     Examples:
-        python -m data.cli import-dir ./csv_data --table daily_ohlcv
-        python -m data.cli import-dir ./data --table daily_ohlcv --pattern "*.csv.gz"
+        python -m factor_pipeline.data.cli import-dir ./csv_data --table daily_ohlcv
+        python -m factor_pipeline.data.cli import-dir ./data --table daily_ohlcv --pattern "*.csv.gz"
     """
     try:
         from glob import glob
@@ -275,8 +275,8 @@ def query_cmd(sql: str, db: str, limit: int, output_format: str, output: str | N
     """Execute SQL query.
 
     Examples:
-        python -m data.cli query "SELECT * FROM daily_ohlcv LIMIT 10"
-        python -m data.cli query "SELECT symbol, COUNT(*) FROM daily_ohlcv GROUP BY symbol"
+        python -m factor_pipeline.data.cli query "SELECT * FROM daily_ohlcv LIMIT 10"
+        python -m factor_pipeline.data.cli query "SELECT symbol, COUNT(*) FROM daily_ohlcv GROUP BY symbol"
     """
     try:
         storage = get_db(db)
@@ -322,8 +322,8 @@ def export_cmd(sql: str, db: str, output: str, output_format: str):
     """Export query results to file.
 
     Examples:
-        python -m data.cli export "SELECT * FROM daily_ohlcv" -o output.csv
-        python -m data.cli export "SELECT * FROM daily_ohlcv" -o output.parquet --format parquet
+        python -m factor_pipeline.data.cli export "SELECT * FROM daily_ohlcv" -o output.csv
+        python -m factor_pipeline.data.cli export "SELECT * FROM daily_ohlcv" -o output.parquet --format parquet
     """
     try:
         storage = get_db(db)
@@ -347,8 +347,8 @@ def stats_cmd(db: str, table: str | None):
     """Show statistics for tables.
 
     Examples:
-        python -m data.cli stats
-        python -m data.cli stats --table daily_ohlcv
+        python -m factor_pipeline.data.cli stats
+        python -m factor_pipeline.data.cli stats --table daily_ohlcv
     """
     try:
         storage = get_db(db)
@@ -390,9 +390,9 @@ def instruments_cmd(db: str, market: str | None, active: bool, output: str | Non
     """List instruments (symbols).
 
     Examples:
-        python -m data.cli instruments
-        python -m data.cli instruments --market SSE
-        python -m data.cli instruments --active -o instruments.csv
+        python -m factor_pipeline.data.cli instruments
+        python -m factor_pipeline.data.cli instruments --market SSE
+        python -m factor_pipeline.data.cli instruments --active -o instruments.csv
     """
     try:
         storage = get_db(db)
@@ -434,8 +434,8 @@ def calendar_cmd(db: str, start: str | None, end: str | None, output: str | None
     """Show trading calendar.
 
     Examples:
-        python -m data.cli calendar
-        python -m data.cli calendar --start 2024-01-01 --end 2024-12-31
+        python -m factor_pipeline.data.cli calendar
+        python -m factor_pipeline.data.cli calendar --start 2024-01-01 --end 2024-12-31
     """
     try:
         storage = get_db(db)

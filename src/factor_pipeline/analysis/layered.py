@@ -98,7 +98,7 @@ class LayeredBacktest:
         turnover = {}
         dates = sorted(df.index.get_level_values(0).unique())
         n_q = self.n_quantiles
-        for i in range(1, len(dates) - 1):
+        for i in range(1, len(dates)):
             prev_d = df.xs(dates[i - 1], level=0)
             curr_d = df.xs(dates[i], level=0)
             prev_top = set(prev_d[prev_d["quantile"] == n_q].index)

@@ -525,7 +525,7 @@ class SQLCompiler:
                 self._new_cte(
                     f"SELECT {self.date_col}, {self.code_col}, {cols}\n" f"    FROM {from_cte}"
                 )
-            return self._over(f"COVAR_SAMP({c1}, {c2})", w)
+            return self._over(f"COVAR_SAMP({c1_alias}, {c2_alias})", w)
 
         # --- Iif / If ---
         if name in ("IIF", "IF"):

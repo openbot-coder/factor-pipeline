@@ -470,7 +470,7 @@ class TestFactorRegistry:
 
         from factor_pipeline.factors.registry import FactorRegistry
 
-        importlib.import_module("factors.gtja191")
+        importlib.import_module("factor_pipeline.factors.gtja191")
 
         names = FactorRegistry.list()
         gtja_factors = [n for n in names if n.startswith("alpha")]
@@ -482,7 +482,7 @@ class TestFactorRegistry:
 
         from factor_pipeline.factors.registry import FactorRegistry
 
-        importlib.import_module("factors.technical")
+        importlib.import_module("factor_pipeline.factors.technical")
 
         names = FactorRegistry.list()
         tech_factors = [n for n in names if n in ["rsi14", "macd_diff", "bb_pct", "atr14", "obv"]]

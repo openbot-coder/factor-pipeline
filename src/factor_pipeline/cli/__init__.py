@@ -331,8 +331,8 @@ def factor_list():
     from factor_pipeline.factors.registry import FactorRegistry
 
     # Load factor modules
-    importlib.import_module("factors.gtja191")
-    importlib.import_module("factors.technical")
+    importlib.import_module("factor_pipeline.factors.gtja191")
+    importlib.import_module("factor_pipeline.factors.technical")
 
     names = FactorRegistry.list()
 
@@ -342,17 +342,24 @@ def factor_list():
     gtja = [n for n in names if n.startswith("alpha")]
     tech = [n for n in names if not n.startswith("alpha")]
 
+    def _format_doc(f, max_len: int = 60) -> str:
+        """Format factor description/docstring, tolerant of missing attributes."""
+        desc = getattr(f, "description", None)
+        if not desc:
+            desc = (f.__doc__ or "").strip() if f is not None else ""
+        return desc[:max_len] if desc else "No description"
+
     if gtja:
         click.echo("\n📈 GTJA 191 Factors:")
         for n in sorted(gtja):
             f = FactorRegistry.get(n)
-            click.echo(f"   {n:15} - {f.description[:60] if f.description else 'No description'}")
+            click.echo(f"   {n:15} - {_format_doc(f)}")
 
     if tech:
         click.echo("\n📊 Technical Indicators:")
         for n in sorted(tech):
             f = FactorRegistry.get(n)
-            click.echo(f"   {n:15} - {f.description[:60] if f.description else 'No description'}")
+            click.echo(f"   {n:15} - {_format_doc(f)}")
 
 
 @factor_group.command("doc")
@@ -366,11 +373,15 @@ def factor_doc(factor_name: str):
         echo_error(f"Factor not found: {factor_name}")
         sys.exit(1)
 
+    desc = getattr(f, "description", None) or (f.__doc__ or "").strip()
+    expr = getattr(f, "expression", "N/A")
+    category = getattr(f, "category", "N/A")
+
     echo_header(f"Factor: {factor_name}")
-    click.echo(f"Expression: {f.expression if hasattr(f, 'expression') else 'N/A'}")
-    click.echo(f"Category: {f.category if hasattr(f, 'category') else 'N/A'}")
+    click.echo(f"Expression: {expr}")
+    click.echo(f"Category: {category}")
     click.echo("\nDescription:")
-    click.echo(f"   {f.description if f.description else 'No description available'}")
+    click.echo(f"   {desc or 'No description available'}")
 
 
 @factor_group.command("run")
@@ -482,16 +493,19 @@ def backtest_run(factors: str, db: str, start: str, end: str, output: str):
     for factor_name in factor_list:
         click.echo(f"\n📊 {factor_name}:")
 
-        try:
-            # Get factor values
-            from factor_pipeline.factors.registry import FactorRegistry
+        # Get factor values
+        from factor_pipeline.factors.registry import FactorRegistry
 
-            factor = FactorRegistry.get(factor_name)
-            if factor:
-                data = storage.get_ohlcv(start_date=start, end_date=end)
-                result = factor.calculate(data)
-                result.to_csv(os.path.join(output, f"{factor_name}_values.csv"))
-                click.echo("   ✅ Factor values saved")
+        factor = FactorRegistry.get(factor_name)
+        if not factor:
+            echo_error(f"Factor not found: {factor_name}")
+            continue
+
+        try:
+            data = storage.get_ohlcv(start_date=start, end_date=end)
+            result = factor.calculate(data)
+            result.to_csv(os.path.join(output, f"{factor_name}_values.csv"))
+            click.echo("   ✅ Factor values saved")
 
             # IC Analysis
             ic = ICAnalysis()
